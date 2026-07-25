@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#f3f5f4" />
+    <title>可燊礼品客服 | 勤益印刷</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#messageInput">跳到消息输入框</a>
+
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand" aria-label="可燊礼品客服">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div>
+            <div class="brand-name">可燊礼品客服</div>
+            <div class="brand-status" id="headerStatus">
+              <span class="status-dot" aria-hidden="true"></span>
+              <span id="headerStatusText">正在连接服务</span>
+            </div>
+          </div>
+        </div>
+
+        <button class="button button--secondary" id="newConversationButton" type="button">
+          <span aria-hidden="true">＋</span>
+          <span>新对话</span>
+        </button>
+      </header>
+
+      <main class="workspace">
+        <aside class="support-sidebar" aria-label="客服服务信息">
+          <section class="sidebar-section" aria-labelledby="serviceStatusTitle">
+            <div class="section-heading">
+              <p class="eyebrow">当前服务</p>
+              <span class="status-badge" id="sidebarStatusBadge">连接中</span>
+            </div>
+            <h2 id="serviceStatusTitle">勤益印刷</h2>
+            <p class="section-copy" id="serviceStatusDetail">
+              正在确认知识库与会话服务状态。
+            </p>
+            <dl class="service-meta">
+              <div>
+                <dt>会话</dt>
+                <dd id="sessionState">尚未开始</dd>
+              </div>
+              <div>
+                <dt>处理方式</dt>
+                <dd id="serviceMode">正在确认</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section class="sidebar-section" aria-labelledby="serviceScopeTitle">
+            <p class="eyebrow">服务范围</p>
+            <h2 id="serviceScopeTitle">可以为您处理</h2>
+            <ul class="scope-list">
+              <li>产品介绍与场景化选型方案</li>
+              <li>尺寸、材质、工艺与包装建议</li>
+              <li>定制需求梳理与报价信息准备</li>
+            </ul>
+          </section>
+
+          <section class="boundary-note" aria-labelledby="boundaryTitle">
+            <h2 id="boundaryTitle">需要人工处理</h2>
+            <p>最终报价与折扣、固定交期、运费税费、订单变更、认证适用性及合同售后事项会转交业务人员确认。</p>
+          </section>
+        </aside>
+
+        <section class="chat-panel" aria-labelledby="conversationTitle">
+          <header class="chat-header">
+            <div>
+              <p class="eyebrow">在线支持</p>
+              <h1 id="conversationTitle">与客服对话</h1>
+            </div>
+            <div class="mobile-service-status" role="status" aria-live="polite">
+              <span class="status-dot" aria-hidden="true"></span>
+              <span id="mobileStatusText">连接中</span>
+            </div>
+          </header>
+
+          <div
+            class="messages"
+            id="messages"
+            role="log"
+            aria-live="polite"
+            aria-relevant="additions"
+            aria-label="对话记录"
+          >
+            <div class="empty-state" id="emptyState">
+              <div class="empty-mark" aria-hidden="true">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+              <h2>您好，需要帮您处理什么？</h2>
+              <p>您可以咨询定制拼图、卡牌、桌游及产品方案。</p>
+              <div class="suggestions" aria-label="常见问题">
+                <button class="suggestion" type="button" data-question="1000片拼图有哪些现有模具尺寸？">
+                  <span>拼图规格</span>
+                  <strong>1000片拼图有哪些尺寸？</strong>
+                </button>
+                <button class="suggestion" type="button" data-question="礼品拼图有哪些包装和材质方案？">
+                  <span>材质与包装</span>
+                  <strong>礼品拼图怎么选择包装？</strong>
+                </button>
+                <button class="suggestion" type="button" data-question="定制拼图的设计文件有什么要求？">
+                  <span>印前文件</span>
+                  <strong>设计文件有什么要求？</strong>
+                </button>
+                <button class="suggestion" type="button" data-question="我想做500套适合15岁左右用户的礼品拼图，请帮我推荐产品方案。">
+                  <span>方案推荐</span>
+                  <strong>帮我推荐一套礼品拼图方案</strong>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="error-banner" id="errorBanner" role="alert" hidden>
+            <div>
+              <strong id="errorTitle">消息发送失败</strong>
+              <p id="errorMessage">请稍后重试。</p>
+            </div>
+            <div class="error-actions">
+              <button class="button button--small" id="retryButton" type="button">重试</button>
+              <button class="icon-button" id="dismissErrorButton" type="button" aria-label="关闭错误提示">
+                ×
+              </button>
+            </div>
+          </div>
+
+          <footer class="composer-region">
+            <form class="composer" id="chatForm">
+              <label class="sr-only" for="messageInput">输入您的问题</label>
+              <textarea
+                id="messageInput"
+                name="message"
+                rows="1"
+                maxlength="2000"
+                placeholder="请输入您的问题"
+                autocomplete="off"
+                enterkeyhint="send"
+                required
+              ></textarea>
+              <button class="send-button" id="sendButton" type="submit" aria-label="发送消息" disabled>
+                <span aria-hidden="true">↑</span>
+              </button>
+            </form>
+            <p class="privacy-note">请勿发送密码、验证码、银行卡号等敏感信息。</p>
+          </footer>
+        </section>
+      </main>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+    <script src="./config.js"></script>
+    <script src="./app.js" defer></script>
+  </body>
+</html>

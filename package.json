@@ -1,0 +1,27 @@
+{
+  "name": "qinyi-ai-support",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Grounded AI customer support starter with OpenAI Responses API, Obsidian ingestion, and human handoff.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js",
+    "check": "node --check src/server.js && node --test test/*.test.js",
+    "kb:prepare": "node scripts/prepare-knowledge.js",
+    "kb:upload": "node scripts/upload-vector-store.js",
+    "eval": "node scripts/eval-mock.js"
+  },
+  "dependencies": {
+    "@fastify/rate-limit": "^10.3.0",
+    "dotenv": "^17.2.0",
+    "fastify": "^5.4.0",
+    "openai": "^5.10.0",
+    "redis": "^5.6.0",
+    "zod": "^3.25.0"
+  }
+}

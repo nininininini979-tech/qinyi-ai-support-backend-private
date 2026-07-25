@@ -1,0 +1,20 @@
+export function toPlainText(value) {
+  return String(value)
+    .replace(/^```[^\n]*$/gm, "")
+    .replace(/^[ \t]*\|?(?:[ \t]*:?-{3,}:?[ \t]*\|)+[ \t]*(?:\r?\n|$)/gm, "")
+    .replace(/^[ \t]*(?:-{3,}|\*{3,}|_{3,})[ \t]*(?:\r?\n|$)/gm, "")
+    .replace(/^[ \t]*\|(.+)\|[ \t]*$/gm, (_, row) => row.split("|").map((cell) => cell.trim()).filter(Boolean).join("；"))
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/~~([^~]+)~~/g, "$1")
+    .replace(/^[ \t]*#{1,6}[ \t]*/gm, "")
+    .replace(/^>\s?/gm, "")
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/`([^`\n]+)`/g, "$1")
+    .replace(/[ \t]*\|[ \t]*/g, "；")
+    .replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, "")
+    .replace(/^[ \t]+|[ \t]+$/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}

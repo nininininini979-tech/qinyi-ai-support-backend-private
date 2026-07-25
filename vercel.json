@@ -1,0 +1,18 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/server.js": {
+      "maxDuration": 60,
+      "includeFiles": [
+        "knowledge/curated/**",
+        "service-playbook/**"
+      ]
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/support/:path*",
+      "destination": "/api/server?route=:path*"
+    }
+  ]
+}
