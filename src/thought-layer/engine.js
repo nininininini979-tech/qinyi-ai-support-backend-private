@@ -192,7 +192,7 @@ export class ThoughtLayerEngine {
   async answer(input) {
     const professional = Boolean(input.options?.professionalConsultation);
     const budgetMs = professional
-      ? Number(this.config.THOUGHT_PROFESSIONAL_DEADLINE_MS || 90_000)
+      ? Number(this.config.THOUGHT_PROFESSIONAL_DEADLINE_MS || 55_000)
       : Number(this.config.THOUGHT_NORMAL_DEADLINE_MS || 40_000);
     const operation = { deadlineAt: Date.now() + budgetMs, cancelled: false };
     try {

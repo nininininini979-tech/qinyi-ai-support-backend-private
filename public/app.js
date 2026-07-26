@@ -2,7 +2,7 @@
   "use strict";
 
   const NORMAL_REQUEST_TIMEOUT_MS = 45_000;
-  const PROFESSIONAL_REQUEST_TIMEOUT_MS = 125_000;
+  const PROFESSIONAL_REQUEST_TIMEOUT_MS = 60_000;
   const runtimeConfig = window.__QINYI_SUPPORT_CONFIG__ || {};
   const API_BASE_URL = typeof runtimeConfig.apiBaseUrl === "string"
     ? runtimeConfig.apiBaseUrl.trim().replace(/\/+$/, "")
@@ -64,7 +64,7 @@
     professionalConsultation: storageRead(window.sessionStorage, "qinyi-professional-consultation") === "true",
     progressTimer: null,
     normalServerBudgetMs: 40_000,
-    professionalServerBudgetMs: 90_000,
+    professionalServerBudgetMs: 55_000,
     normalRequestTimeoutMs: NORMAL_REQUEST_TIMEOUT_MS,
     professionalRequestTimeoutMs: PROFESSIONAL_REQUEST_TIMEOUT_MS,
   };
@@ -577,9 +577,9 @@
       if (data.replyBudgets) {
         const budgets = data.replyBudgets;
         if (Number.isFinite(budgets.normalServerMs)) state.normalServerBudgetMs = budgets.normalServerMs;
-        if (Number.isFinite(budgets.professionalServerMs)) state.professionalServerBudgetMs = budgets.professionalServerMs;
+        if (Number.isFinite(budgets.professionalServerMs)) state.professionalServerBudgetMs = Math.min(budgets.professionalServerMs, 55_000);
         if (Number.isFinite(budgets.normalClientMs)) state.normalRequestTimeoutMs = budgets.normalClientMs;
-        if (Number.isFinite(budgets.professionalClientMs)) state.professionalRequestTimeoutMs = budgets.professionalClientMs;
+        if (Number.isFinite(budgets.professionalClientMs)) state.professionalRequestTimeoutMs = Math.min(budgets.professionalClientMs, PROFESSIONAL_REQUEST_TIMEOUT_MS);
       }
 
       if (data.aiEnabled === false) {

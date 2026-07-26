@@ -48,9 +48,9 @@ test("status reports the Agent company without exposing API keys", async (t) => 
   assert.deepEqual(Object.keys(body.agents), ["a", "b", "c", "d"]);
   assert.deepEqual(body.replyBudgets, {
     normalServerMs: 40000,
-    professionalServerMs: 90000,
+    professionalServerMs: 55000,
     normalClientMs: 41000,
-    professionalClientMs: 95000
+    professionalClientMs: 60000
   });
   assert.doesNotMatch(JSON.stringify(body), /apiKey|API_KEY|sk-/);
 });
