@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#f4f6f5" />
+    <meta name="robots" content="noindex,nofollow,noarchive" />
+    <title>勤益运营中心</title>
+    <link rel="stylesheet" href="./operations.css" />
+  </head>
+  <body data-surface="admin">
+    <a class="skip-link" href="#mainContent">跳到主要内容</a>
+    <div class="ops-shell">
+      <aside class="ops-sidebar" aria-label="运营中心导航">
+        <a class="ops-brand" href="#dashboard" aria-label="勤益运营中心首页">
+          <span class="brand-mark" aria-hidden="true">勤</span>
+          <span><strong>勤益运营中心</strong><span>客户服务与内容管理</span></span>
+        </a>
+        <nav class="ops-nav">
+          <div class="ops-nav-group">
+            <p class="ops-nav-label">日常工作</p>
+            <button type="button" data-nav="dashboard" data-title="工作台"><span class="nav-icon">首</span>工作台</button>
+            <button type="button" data-nav="sessions" data-title="实时会话"><span class="nav-icon">聊</span>实时会话</button>
+          </div>
+          <div class="ops-nav-group">
+            <p class="ops-nav-label">经营信息</p>
+            <button type="button" data-nav="important" data-title="重要信息"><span class="nav-icon">要</span>重要信息</button>
+            <button type="button" data-nav="content" data-title="网站内容"><span class="nav-icon">文</span>网站内容</button>
+            <button type="button" data-nav="notifications" data-title="通知设置"><span class="nav-icon">知</span>通知设置</button>
+          </div>
+          <div class="ops-nav-group">
+            <p class="ops-nav-label">服务治理</p>
+            <button type="button" data-nav="rules" data-title="客服规则"><span class="nav-icon">规</span>客服规则</button>
+            <button type="button" data-nav="audit" data-title="操作记录"><span class="nav-icon">录</span>操作记录</button>
+          </div>
+        </nav>
+        <div class="sidebar-foot">
+          <div class="identity"><span class="identity-avatar">管</span><span><strong id="operatorName">运营管理员</strong><small id="operatorRole">权限确认中</small></span></div>
+        </div>
+      </aside>
+
+      <div class="ops-stage">
+        <header class="ops-topbar">
+          <div class="mobile-brand"><span class="brand-mark" aria-hidden="true">勤</span><strong id="mobileViewTitle">工作台</strong></div>
+          <div class="topbar-context"><strong>运营中心</strong><div class="connection" data-connection data-tone="neutral"><i aria-hidden="true"></i><span>正在连接</span></div></div>
+          <div class="topbar-actions">
+            <button class="button button--secondary" id="enableAlertsButton" type="button" aria-pressed="false" title="开启新人工请求的声音和浏览器提醒"><span aria-hidden="true">铃</span><span class="button-label-wide">开启提醒</span></button>
+            <button class="button button--secondary" type="button" data-refresh-current><span aria-hidden="true">↻</span><span class="button-label-wide">刷新数据</span></button>
+            <button class="button button--secondary" type="button" data-logout><span aria-hidden="true">出</span><span class="button-label-wide">退出登录</span></button>
+            <a class="button" href="./" target="_blank" rel="noopener">打开客服</a>
+          </div>
+        </header>
+
+        <main class="ops-main" id="mainContent">
+          <section class="view" data-view="dashboard" aria-labelledby="dashboardTitle">
+            <div class="page-heading"><div><h1 id="dashboardTitle">工作台</h1><p>先处理需要人工介入的会话，再检查重要信息与待发布内容。</p></div><div class="page-actions"><button class="button button--secondary" type="button" data-go-view="important">更新重要信息</button><button class="button" type="button" data-go-view="sessions">进入会话</button></div></div>
+            <div class="metric-grid" id="dashboardMetrics"> </div>
+            <div class="dashboard-grid">
+              <section class="panel"><header class="panel-header"><div class="panel-title"><h2>待处理会话</h2><p>转人工、情绪升级和长时间等待</p></div><button class="button button--secondary button--small" type="button" data-go-view="sessions">查看全部</button></header><div class="panel-body" id="dashboardQueue"></div></section>
+              <section class="panel"><header class="panel-header"><div class="panel-title"><h2>需要留意</h2><p>服务风险和业务提醒</p></div></header><div class="panel-body stack" id="dashboardAlerts"></div></section>
+            </div>
+            <div class="dashboard-grid dashboard-grid--equal">
+              <section class="panel"><header class="panel-header"><div class="panel-title"><h2>内容进度</h2><p>草稿、待审核与最近发布</p></div><button class="button button--secondary button--small" type="button" data-go-view="content">管理内容</button></header><div class="panel-body" id="dashboardContent"></div></section>
+              <section class="panel"><header class="panel-header"><div class="panel-title"><h2>最近动态</h2><p>运营团队的重要操作</p></div></header><div class="panel-body" id="dashboardActivity"></div></section>
+            </div>
+          </section>
+
+          <section class="view" data-view="sessions" aria-labelledby="sessionsTitle" hidden>
+            <div class="page-heading"><div><h1 id="sessionsTitle">实时会话</h1><p>左侧选择访客，中间查看并回复，右侧确认客户与转人工信息。</p></div><div class="page-actions"><span id="sessionLiveStatus"></span></div></div>
+            <div class="session-layout">
+              <section class="session-column session-column--list" aria-label="会话列表">
+                <header class="session-column-header"><input class="search-input" id="sessionSearch" type="search" placeholder="搜索客户、工单或内容" aria-label="搜索会话" /></header>
+                <div class="session-list" id="sessionList"></div>
+              </section>
+              <section class="session-column conversation" aria-label="对话内容">
+                <header class="conversation-head" id="conversationHead"><div><h2>选择一个会话</h2><p>会话详情将在这里显示</p></div></header>
+                <div class="message-stream" id="messageStream"></div>
+                <form class="conversation-composer" id="replyForm"><div class="composer-row"><label class="sr-only" for="replyInput">回复访客</label><textarea id="replyInput" class="search-input" rows="1" maxlength="2000" placeholder="选择会话后可发送人工回复" disabled></textarea><button class="button" id="sendReplyButton" type="submit" disabled>发送</button></div></form>
+              </section>
+              <aside class="session-column session-column--detail" aria-label="客户和会话信息">
+                <header class="session-column-header"><strong>客户与会话信息</strong></header>
+                <div class="customer-detail" id="sessionDetail"></div>
+              </aside>
+            </div>
+          </section>
+
+          <section class="view" data-view="important" aria-labelledby="importantTitle" hidden>
+            <div class="page-heading"><div><h1 id="importantTitle">重要信息</h1><p>维护客服回答必须优先采用的联系方式、产能、假期和业务边界。</p></div><div class="page-actions"><button class="button button--secondary" type="button" id="importantPreviewButton">预览变更</button><button class="button" type="submit" form="importantForm">保存草稿</button></div></div>
+            <form class="panel" id="importantForm"><div class="panel-body" id="importantFormBody"></div></form>
+          </section>
+
+          <section class="view" data-view="content" aria-labelledby="contentTitle" hidden>
+            <div class="page-heading"><div><h1 id="contentTitle">网站内容</h1><p>按页面管理草稿、预览和发布状态，正式发布前仍需审批。</p></div><div class="page-actions"><button class="button" type="button" id="newContentButton">新建内容</button></div></div>
+            <div class="filterbar"><input class="search-input" id="contentSearch" type="search" placeholder="搜索标题或页面" aria-label="搜索网站内容" /><select id="contentStatusFilter" aria-label="筛选内容状态"><option value="">全部状态</option><option value="draft">草稿</option><option value="pending">待审核</option><option value="approved">已批准</option><option value="published">已发布</option></select></div>
+            <section class="panel"><div class="panel-body panel-body--flush" id="contentTable"></div></section>
+          </section>
+
+          <section class="view" data-view="notifications" aria-labelledby="notificationsTitle" hidden>
+            <div class="page-heading"><div><h1 id="notificationsTitle">通知设置</h1><p>决定哪些业务事件需要通知，以及通过哪些工作渠道送达。</p></div><div class="page-actions"><button class="button" type="submit" form="notificationsForm">保存设置</button></div></div>
+            <form class="dashboard-grid dashboard-grid--equal" id="notificationsForm"><section class="panel"><header class="panel-header"><div class="panel-title"><h2>事件通知</h2><p>可按事项独立开启</p></div></header><div class="panel-body" id="notificationEvents"></div></section><section class="panel"><header class="panel-header"><div class="panel-title"><h2>接收渠道</h2><p>请由开发团队完成渠道验证</p></div></header><div class="panel-body" id="notificationChannels"></div></section></form>
+          </section>
+
+          <section class="view" data-view="rules" aria-labelledby="rulesTitle" hidden>
+            <div class="page-heading"><div><h1 id="rulesTitle">客服规则</h1><p>管理人工优先、敏感事项和自动回复边界，降低错误承诺风险。</p></div><div class="page-actions"><button class="button button--secondary" type="button" id="rulesTestButton">测试规则</button><button class="button" type="submit" form="rulesForm">保存草稿</button></div></div>
+            <form id="rulesForm"><div class="dashboard-grid dashboard-grid--equal"><section class="panel"><header class="panel-header"><div class="panel-title"><h2>服务模式</h2><p>控制 AI 与人工的协作方式</p></div></header><div class="panel-body" id="serviceModeRules"></div></section><section class="panel"><header class="panel-header"><div class="panel-title"><h2>必须转人工</h2><p>命中后停止自动承诺</p></div></header><div class="panel-body" id="handoffRules"></div></section></div><section class="panel"><header class="panel-header"><div class="panel-title"><h2>自定义说明</h2><p>补充当期业务政策和应答口径</p></div></header><div class="panel-body"><div class="field"><label for="rulesNote">运营说明</label><textarea id="rulesNote" name="note" maxlength="4000" placeholder="例如：国庆假期期间不承诺具体出货日期。"></textarea></div></div></section></form>
+          </section>
+
+          <section class="view" data-view="audit" aria-labelledby="auditTitle" hidden>
+            <div class="page-heading"><div><h1 id="auditTitle">操作记录</h1><p>查询内容发布、规则修改、会话接管和权限相关操作。</p></div><div class="page-actions"><button class="button button--secondary" type="button" id="exportAuditButton">导出记录</button></div></div>
+            <div class="filterbar"><input class="search-input" id="auditSearch" type="search" placeholder="搜索人员、对象或说明" aria-label="搜索操作记录" /><select id="auditActionFilter" aria-label="筛选操作类型"><option value="">全部操作</option><option value="content">内容</option><option value="session">会话</option><option value="rules">规则</option><option value="access">权限</option></select></div>
+            <section class="panel"><div class="panel-body panel-body--flush" id="auditTable"></div></section>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <nav class="mobile-bottom-nav mobile-bottom-nav--admin" aria-label="移动端主要导航">
+      <button type="button" data-nav="dashboard" data-title="工作台"><span class="nav-icon">首</span><span>工作台</span></button>
+      <button type="button" data-nav="sessions" data-title="实时会话"><span class="nav-icon">聊</span><span>会话</span></button>
+      <button type="button" data-nav="content" data-title="网站内容"><span class="nav-icon">文</span><span>内容</span></button>
+      <button type="button" data-nav="rules" data-title="客服规则"><span class="nav-icon">规</span><span>规则</span></button>
+      <button type="button" data-nav="audit" data-title="操作记录"><span class="nav-icon">录</span><span>记录</span></button>
+    </nav>
+    <div class="ops-toast" id="opsToast" role="status" aria-live="polite" hidden></div>
+    <script src="./operations-common.js"></script>
+    <script src="./admin.js" defer></script>
+  </body>
+</html>

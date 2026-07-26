@@ -39,6 +39,14 @@ const schema = z.object({
   THOUGHT_STAGE_DAYS: z.coerce.number().int().min(1).max(90).default(7),
   THOUGHT_NORMAL_DEADLINE_MS: z.coerce.number().int().min(30000).max(44000).default(40000),
   THOUGHT_PROFESSIONAL_DEADLINE_MS: z.coerce.number().int().min(45000).max(55000).default(55000),
+  OPERATIONS_ENABLED: bool,
+  OPERATIONS_DATA_DIR: z.string().default("data/runtime/operations"),
+  OPERATIONS_ADMIN_PASSWORD: z.string().optional(),
+  OPERATIONS_ADMIN_TOTP_SECRET: z.string().optional(),
+  OPERATIONS_USERS_JSON: z.string().optional(),
+  OPERATIONS_SESSION_SECRET: z.string().optional(),
+  OPERATIONS_SESSION_TTL_SECONDS: z.coerce.number().int().min(300).max(86400).default(28800),
+  OPERATIONS_DEVELOPER_TOKEN: z.string().optional(),
   OPERATOR_MODE: z.enum(["observe", "draft", "auto", "paused"]).default("auto"),
   AGENT_A_PROVIDER: z.enum(["mock", "openai-compatible"]).default("mock"),
   AGENT_A_API_KEY: z.string().optional(),
@@ -79,6 +87,27 @@ export function loadConfig(env = process.env) {
     if (config[`AGENT_${role}_PROVIDER`] === "openai-compatible" && !config[`AGENT_${role}_API_KEY`]) {
       throw new Error(`AGENT_${role}_PROVIDER=openai-compatible requires AGENT_${role}_API_KEY`);
     }
+  }
+  if (config.OPERATIONS_ENABLED) {
+    let users = [];
+    if (config.OPERATIONS_USERS_JSON) {
+      try { users = JSON.parse(config.OPERATIONS_USERS_JSON); }
+      catch (_error) { throw new Error("OPERATIONS_USERS_JSON must be valid JSON"); }
+      if (!Array.isArray(users) || users.length < 1 || users.length > 12) throw new Error("OPERATIONS_USERS_JSON must contain 1 to 12 users");
+      for (const user of users) {
+        if (!/^[A-Za-z0-9_.-]{2,40}$/.test(String(user.username || ""))) throw new Error("Each operations user requires a valid username");
+        if (String(user.password || "").length < 12) throw new Error("Each operations user password must contain at least 12 characters");
+        if (!/^[A-Z2-7\s-]{16,}$/i.test(String(user.totpSecret || ""))) throw new Error("Each operations user requires a base32 TOTP secret");
+        if (!["support", "administrator", "developer", "system_owner"].includes(user.role)) throw new Error("Unsupported operations user role");
+      }
+    } else {
+      if (!config.OPERATIONS_ADMIN_PASSWORD || config.OPERATIONS_ADMIN_PASSWORD.length < 12) throw new Error("OPERATIONS_ENABLED=true requires OPERATIONS_ADMIN_PASSWORD with at least 12 characters");
+      if (!config.OPERATIONS_ADMIN_TOTP_SECRET || !/^[A-Z2-7\s-]{16,}$/i.test(config.OPERATIONS_ADMIN_TOTP_SECRET)) throw new Error("OPERATIONS_ENABLED=true requires a base32 OPERATIONS_ADMIN_TOTP_SECRET");
+      users = [{ username: "admin", displayName: "勤益系统负责人", role: "system_owner", password: config.OPERATIONS_ADMIN_PASSWORD, totpSecret: config.OPERATIONS_ADMIN_TOTP_SECRET }];
+    }
+    config.operationsUsers = users;
+    if (!config.OPERATIONS_SESSION_SECRET || config.OPERATIONS_SESSION_SECRET.length < 32) throw new Error("OPERATIONS_ENABLED=true requires OPERATIONS_SESSION_SECRET with at least 32 characters");
+    if (!config.OPERATIONS_DEVELOPER_TOKEN || config.OPERATIONS_DEVELOPER_TOKEN.length < 24) throw new Error("OPERATIONS_ENABLED=true requires OPERATIONS_DEVELOPER_TOKEN with at least 24 characters");
   }
   if (config.NODE_ENV === "production") {
     if (config.AUTH_MODE === "demo") throw new Error("AUTH_MODE=demo is forbidden in production");

@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#f4f6f5" />
+    <meta name="robots" content="noindex,nofollow,noarchive" />
+    <title>勤益系统控制台</title>
+    <link rel="stylesheet" href="./operations.css" />
+  </head>
+  <body data-surface="developer">
+    <a class="skip-link" href="#mainContent">跳到主要内容</a>
+    <div class="ops-shell">
+      <aside class="ops-sidebar" aria-label="系统控制台导航">
+        <a class="ops-brand" href="#systems" aria-label="勤益系统控制台首页">
+          <span class="brand-mark" aria-hidden="true">勤</span>
+          <span><strong>勤益系统控制台</strong><span>服务可靠性与发布治理</span></span>
+        </a>
+        <nav class="ops-nav">
+          <div class="ops-nav-group">
+            <p class="ops-nav-label">运行状态</p>
+            <button type="button" data-nav="systems" data-title="系统状态"><span class="nav-icon">态</span>系统状态</button>
+            <button type="button" data-nav="traces" data-title="Agent 追踪"><span class="nav-icon">链</span>Agent 追踪</button>
+          </div>
+          <div class="ops-nav-group">
+            <p class="ops-nav-label">变更管理</p>
+            <button type="button" data-nav="releases" data-title="发布审批"><span class="nav-icon">发</span>发布审批</button>
+            <button type="button" data-nav="environment" data-title="环境与集成"><span class="nav-icon">接</span>环境与集成</button>
+          </div>
+          <div class="ops-nav-group">
+            <p class="ops-nav-label">值班</p>
+            <button type="button" data-nav="emergency" data-title="移动应急"><span class="nav-icon">急</span>移动应急</button>
+          </div>
+        </nav>
+        <div class="sidebar-foot"><div class="identity"><span class="identity-avatar">开</span><span><strong id="developerName">值班开发者</strong><small id="developerRole">权限确认中</small></span></div></div>
+      </aside>
+
+      <div class="ops-stage">
+        <header class="ops-topbar">
+          <div class="mobile-brand"><span class="brand-mark" aria-hidden="true">勤</span><strong id="mobileViewTitle">系统状态</strong></div>
+          <div class="topbar-context"><strong>系统控制台</strong><div class="connection" data-connection data-tone="neutral"><i aria-hidden="true"></i><span>正在连接</span></div></div>
+          <div class="topbar-actions"><span id="environmentBadge"></span><button class="button button--secondary" type="button" data-refresh-current><span aria-hidden="true">↻</span><span class="button-label-wide">刷新</span></button><button class="button button--secondary" type="button" data-logout><span aria-hidden="true">出</span><span class="button-label-wide">退出登录</span></button></div>
+        </header>
+
+        <main class="ops-main" id="mainContent">
+          <section class="view" data-view="systems" aria-labelledby="systemsTitle">
+            <div class="page-heading"><div><h1 id="systemsTitle">系统状态</h1><p>从入口、对话、Agent 与数据四个系统确认完整服务链路。</p></div><div class="page-actions"><span id="overallStatus"></span></div></div>
+            <div class="system-grid" id="systemCards"></div>
+            <div class="dashboard-grid">
+              <section class="panel"><header class="panel-header"><div class="panel-title"><h2>关键指标</h2><p>当前运营数据</p></div></header><div class="panel-body" id="systemMetrics"></div></section>
+              <section class="panel"><header class="panel-header"><div class="panel-title"><h2>当前事件</h2><p>未恢复的告警与性能下降</p></div></header><div class="panel-body stack" id="incidents"></div></section>
+            </div>
+            <section class="panel"><header class="panel-header"><div class="panel-title"><h2>近期变化</h2><p>部署、配置和依赖状态</p></div></header><div class="panel-body panel-body--flush" id="changesTable"></div></section>
+          </section>
+
+          <section class="view" data-view="traces" aria-labelledby="tracesTitle" hidden>
+            <div class="page-heading"><div><h1 id="tracesTitle">Agent 追踪</h1><p>按请求查看分工、证据、审核和最终输出，敏感正文默认脱敏。</p></div><div class="page-actions"><button class="button button--secondary" type="button" id="liveTraceToggle" aria-pressed="true">实时刷新：开</button></div></div>
+            <div class="filterbar"><input class="search-input" id="traceSearch" type="search" placeholder="请求编号或会话编号" aria-label="搜索追踪" /><select id="traceStatusFilter" aria-label="筛选追踪状态"><option value="">全部结果</option><option value="complete">成功</option><option value="warning">需关注</option><option value="failed">失败</option></select><select id="traceAgentFilter" aria-label="筛选 Agent"><option value="">全部 Agent</option></select></div>
+            <div class="trace-layout">
+              <section class="panel"><header class="panel-header"><div class="panel-title"><h2>最近请求</h2><p>选择一条查看完整链路</p></div></header><div class="panel-body panel-body--flush" id="traceList"></div></section>
+              <section class="panel"><header class="panel-header" id="traceDetailHeader"><div class="panel-title"><h2>追踪详情</h2><p>尚未选择请求</p></div></header><div class="panel-body" id="traceDetail"></div></section>
+            </div>
+          </section>
+
+          <section class="view" data-view="releases" aria-labelledby="releasesTitle" hidden>
+            <div class="page-heading"><div><h1 id="releasesTitle">发布审批</h1><p>核对变更、检查结果和回滚点后，再批准进入下一环境。</p></div><div class="page-actions"><span id="releaseQueueStatus"></span></div></div>
+            <section class="panel"><div class="panel-body panel-body--flush" id="releaseTable"></div></section>
+            <section class="panel" id="releaseDetailPanel"><header class="panel-header" id="releaseDetailHeader"><div class="panel-title"><h2>发布详情</h2><p>从列表选择待审批发布</p></div></header><div class="panel-body" id="releaseDetail"></div></section>
+          </section>
+
+          <section class="view" data-view="environment" aria-labelledby="environmentTitle" hidden>
+            <div class="page-heading"><div><h1 id="environmentTitle">环境与集成</h1><p>查看环境版本、配置完整性及外部服务连接，不在浏览器显示密钥值。</p></div></div>
+            <div class="dashboard-grid dashboard-grid--equal">
+              <section class="panel"><header class="panel-header"><div class="panel-title"><h2>环境</h2><p>版本与运行配置</p></div></header><div class="panel-body" id="environmentList"></div></section>
+              <section class="panel"><header class="panel-header"><div class="panel-title"><h2>集成</h2><p>提供方、存储与通知渠道</p></div></header><div class="panel-body" id="integrationList"></div></section>
+            </div>
+            <section class="panel"><header class="panel-header"><div class="panel-title"><h2>配置检查</h2><p>只返回是否配置与最后验证时间</p></div><button class="button button--secondary button--small" type="button" id="verifyIntegrationsButton">重新验证</button></header><div class="panel-body panel-body--flush" id="configurationTable"></div></section>
+          </section>
+
+          <section class="view" data-view="emergency" aria-labelledby="emergencyTitle" hidden>
+            <div class="page-heading"><div><h1 id="emergencyTitle">移动应急</h1><p>为手机值班场景保留最少且可审计的止损操作，高风险操作需要二次确认。</p></div><div class="page-actions"><span id="onCallStatus"></span></div></div>
+            <div class="metric-grid" id="emergencyMetrics"></div>
+            <div class="dashboard-grid dashboard-grid--equal">
+              <section class="panel"><header class="panel-header"><div class="panel-title"><h2>安全操作</h2><p>快速降低影响，不修改业务数据</p></div></header><div class="panel-body stack" id="emergencyActions"></div></section>
+              <section class="panel"><header class="panel-header"><div class="panel-title"><h2>值班与事件</h2><p>当前联系人和未关闭事件</p></div></header><div class="panel-body" id="onCallDetail"></div></section>
+            </div>
+            <section class="panel"><header class="panel-header"><div class="panel-title"><h2>最近应急操作</h2><p>所有操作均写入审计记录</p></div></header><div class="panel-body panel-body--flush" id="emergencyHistory"></div></section>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <nav class="mobile-bottom-nav" aria-label="移动端导航">
+      <button type="button" data-nav="systems" data-title="系统状态"><span class="nav-icon">态</span><span>状态</span></button>
+      <button type="button" data-nav="traces" data-title="Agent 追踪"><span class="nav-icon">链</span><span>追踪</span></button>
+      <button type="button" data-nav="releases" data-title="发布审批"><span class="nav-icon">发</span><span>发布</span></button>
+      <button type="button" data-nav="environment" data-title="环境与集成"><span class="nav-icon">接</span><span>集成</span></button>
+      <button type="button" data-nav="emergency" data-title="移动应急"><span class="nav-icon">急</span><span>应急</span></button>
+    </nav>
+    <div class="ops-toast" id="opsToast" role="status" aria-live="polite" hidden></div>
+    <script src="./operations-common.js"></script>
+    <script src="./developer.js" defer></script>
+  </body>
+</html>

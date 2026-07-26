@@ -166,6 +166,31 @@ npm test
 | `POST` | `/api/support/sessions/:sessionId/handoff` | 主动请求人工工单 |
 | `POST` | `/api/support/feedback` | 记录赞/踩；演示版仅存聚合字段 |
 
+## 单机运营核心
+
+`OPERATIONS_ENABLED=false` 是默认值，此时客服行为与原开发/公开部署保持一致。设为 `true` 后，服务会在 `OPERATIONS_DATA_DIR` 使用原子替换的 JSON 快照保存对话、消息、转人工队列、联系人、待发送通知、内容修订和系统配置，并将审计、客服与 Agent 事件只追加到 `events.ndjson`。该适配器面向有持久磁盘的单服务器；Vercel Functions 等临时文件系统不能作为其生产存储。后续可保持 `OperationsService` 接口不变，替换为数据库适配器。
+
+启用时必须设置：
+
+```dotenv
+OPERATIONS_ENABLED=true
+OPERATIONS_DATA_DIR=/var/lib/qinyi-support/operations
+OPERATIONS_ADMIN_PASSWORD=至少12字符的独立密码
+OPERATIONS_ADMIN_TOTP_SECRET=标准Base32密钥
+OPERATIONS_SESSION_SECRET=至少32字符的随机密钥
+OPERATIONS_DEVELOPER_TOKEN=至少24字符的随机令牌
+```
+
+单用户模式的登录账号固定为 `admin`。需要多人分别登录时，使用 `OPERATIONS_USERS_JSON` 替代 `OPERATIONS_ADMIN_PASSWORD` 和 `OPERATIONS_ADMIN_TOTP_SECRET`：
+
+```dotenv
+OPERATIONS_USERS_JSON=[{"username":"support01","displayName":"客服一组","role":"support","password":"替换为至少12字符的独立密码","totpSecret":"替换为标准Base32密钥"},{"username":"developer01","displayName":"值班开发者","role":"developer","password":"替换为另一组至少12字符密码","totpSecret":"替换为另一组Base32密钥"}]
+```
+
+该数组允许 1-12 个账号；`username` 允许字母、数字、点、下划线和连字符，角色可为 `support`、`administrator`、`developer` 或 `system_owner`。每个账号必须使用独立密码和独立 TOTP 密钥，不要把真实配置提交到 Git。设置 `OPERATIONS_USERS_JSON` 后，登录页面必须填写对应用户名，旧的单用户密码和 TOTP 字段不再参与认证。
+
+后台登录要求用户名、密码和六位 TOTP，成功后返回短期 Bearer 会话令牌；持久化文件只保存令牌的 HMAC。管理员 API 提供概览、对话、转人工、联系人、通知、内容修订、系统配置和事件账本。`POST /api/developer/events` 使用独立开发者 Bearer 令牌追加 Agent 事件，`POST /api/support/events` 使用既有访客身份规则记录客服界面事件。启用运营核心后，公开站点的人工请求会创建持久化 `OPS-` 服务请求和待处理通知，不再返回假工单。
+
 开发模式可直接请求：
 
 ```bash

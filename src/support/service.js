@@ -40,6 +40,12 @@ export class SupportService {
         void this.provider.recordGovernanceSignal({ sessionId, signal: "major_complaint" })?.catch(() => {});
       }
       if (this.config.AUTH_MODE === "public") {
+        if (this.handoff.publicAvailable) {
+          const ticket = await this.handoff.create({ ...identity, sessionId, reason: policy.reason || "manual_required", unresolvedQuestion: message });
+          session.handoffTicketId = ticket.id;
+          sessionId = (await this.sessionStore.save(identity.tenantId, identity.userId, sessionId, session)) || sessionId;
+          return { sessionId, action: "handoff", answer: "这项业务需要人工人员继续处理，您的服务请求已进入待处理队列。", ticketId: ticket.id, citations: [] };
+        }
         session.manualRequired = true;
         sessionId = (await this.sessionStore.save(identity.tenantId, identity.userId, sessionId, session)) || sessionId;
         return {
@@ -72,6 +78,12 @@ export class SupportService {
       session.history = [...session.history, { user: message, assistant: result.answer }].slice(-historyLimit);
       session.manualRequired = true;
       if (this.config.AUTH_MODE === "public") {
+        if (this.handoff.publicAvailable) {
+          const ticket = await this.handoff.create({ ...identity, sessionId, reason: "thought_layer_review_failed", unresolvedQuestion: message, handoffReport: result.handoffReport });
+          session.handoffTicketId = ticket.id;
+          sessionId = (await this.sessionStore.save(identity.tenantId, identity.userId, sessionId, session)) || sessionId;
+          return { sessionId, action: "handoff", answer: result.answer, ticketId: ticket.id, citations: [] };
+        }
         sessionId = (await this.sessionStore.save(identity.tenantId, identity.userId, sessionId, session)) || sessionId;
         return { sessionId, action: "manual_required", answer: result.answer, citations: [] };
       }
@@ -93,6 +105,12 @@ export class SupportService {
 
     if (session.unresolvedCount >= 3) {
       if (this.config.AUTH_MODE === "public") {
+        if (this.handoff.publicAvailable) {
+          const ticket = await this.handoff.create({ ...identity, sessionId, reason: "repeated_unresolved", unresolvedQuestion: message });
+          session.handoffTicketId = ticket.id;
+          sessionId = (await this.sessionStore.save(identity.tenantId, identity.userId, sessionId, session)) || sessionId;
+          return { sessionId, action: "handoff", answer: "连续三次没有找到足够可靠的资料，您的服务请求已进入待处理队列。", ticketId: ticket.id, citations: [] };
+        }
         session.manualRequired = true;
         sessionId = (await this.sessionStore.save(identity.tenantId, identity.userId, sessionId, session)) || sessionId;
         return { sessionId, action: "manual_required", answer: "连续三次没有找到足够可靠的资料。公开站点不会创建真实工单，请通过公司的正式联系方式联系业务人员。", citations: [] };
@@ -115,6 +133,12 @@ export class SupportService {
       throw error;
     }
     if (this.config.AUTH_MODE === "public") {
+      if (this.handoff.publicAvailable) {
+        const ticket = await this.handoff.create({ ...identity, sessionId, reason: "explicit_request", unresolvedQuestion: message });
+        session.handoffTicketId = ticket.id;
+        sessionId = (await this.sessionStore.save(identity.tenantId, identity.userId, sessionId, session)) || sessionId;
+        return { sessionId, action: "handoff", answer: "您的人工服务请求已进入待处理队列。", ticketId: ticket.id, citations: [] };
+      }
       session.manualRequired = true;
       sessionId = (await this.sessionStore.save(identity.tenantId, identity.userId, sessionId, session)) || sessionId;
       return { sessionId, action: "manual_required", answer: "公开站点不会创建真实工单，请通过公司的正式联系方式联系业务人员。" };
