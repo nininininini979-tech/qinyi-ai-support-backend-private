@@ -51,3 +51,23 @@ test("D counts a multi-turn session once toward the conversation threshold", asy
   const state = JSON.parse(await fs.readFile(path.join(directory, "stage-state.json"), "utf8"));
   assert.equal(state.completedConversations, 1);
 });
+
+test("D Agent analysis is attached to a stage proposal", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "qinyi-stage-agent-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  let snapshot;
+  const governor = new LocalStageGovernor({
+    directory,
+    conversationThreshold: 2,
+    stageAnalyzer: async (value) => {
+      snapshot = value;
+      return { summary: "D 独立分析", proposedBy: "agent-d" };
+    }
+  });
+  await governor.initialize();
+  await governor.recordOutcome({ outcome: "accepted_first_pass", sessionId: "one", stageSample: { outcome: "accepted_first_pass", issueCodes: [] } });
+  const candidate = await governor.recordOutcome({ outcome: "accepted_first_pass", sessionId: "two", stageSample: { outcome: "accepted_first_pass", issueCodes: ["example"] } });
+  assert.equal(candidate.analysis.summary, "D 独立分析");
+  assert.equal(candidate.analysis.proposedBy, "agent-d");
+  assert.equal(snapshot.samples.length, 2);
+});

@@ -86,6 +86,17 @@ test("chat options are allowlisted and arbitrary prompt injection fields are rej
   assert.equal(rejected.statusCode, 400);
 });
 
+test("operator control exposes four departments and paused mode prevents automatic replies", async (t) => {
+  const config = testConfig();
+  config.OPERATOR_MODE = "paused";
+  const app = await buildApp(config);
+  t.after(() => app.close());
+  assert.deepEqual(Object.keys(app.operatorControl.status().agentCompany), ["a", "b", "c", "d"]);
+  const response = await app.inject({ method: "POST", url: "/api/support/chat", payload: { message: "介绍产品" } });
+  assert.equal(response.json().action, "handoff");
+  assert.match(response.json().answer, /人工审核和接管/);
+});
+
 test("public mode accepts an anonymous client and returns exact CORS headers", async (t) => {
   const app = await buildApp(publicConfig());
   t.after(() => app.close());

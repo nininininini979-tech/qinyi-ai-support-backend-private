@@ -1,15 +1,21 @@
 import { loadAutonomyPrompt } from "../support/playbook.js";
-import { buildGenerationPrompt, buildReviewerPrompt } from "./prompts.js";
-import { compileTaskContract, sessionThoughtState } from "./contract.js";
-import { combineReviews, parseModelReview, reviewDeterministically } from "./reviewer.js";
-import { riskAtLeast } from "./risk.js";
+import { AAgent, BAgent, CAgent, DAgent } from "../agent-company/agents.js";
+import { CompanyPolicyEngine } from "../agent-company/company-policy.js";
+import { createAgentApiWindows } from "../agent-company/api-windows.js";
+import { AGENT_IDS, InProcessAgentBus } from "../agent-company/protocol.js";
+import { sessionThoughtState } from "./contract.js";
 
-function candidateView(result) {
+function candidateView(candidate) {
+  const result = candidate.result;
   return {
+    id: candidate.id,
+    branch: candidate.branch,
     answer: result.answer,
     grounded: Boolean(result.grounded),
     citations: result.citations || [],
-    evidence: result.reviewEvidence || []
+    evidence: result.reviewEvidence || [],
+    producedBy: candidate.producedBy,
+    run: candidate.run
   };
 }
 
@@ -17,114 +23,150 @@ function publicIssues(review) {
   return review.issues.map(({ code, severity, reason, repairConstraint }) => ({ code, severity, reason, repairConstraint }));
 }
 
-function chooseBest(items) {
-  return [...items].sort((left, right) => right.review.score - left.review.score)[0];
+function bestCandidate(candidates) {
+  return [...candidates].sort((left, right) => (right.review?.score || 0) - (left.review?.score || 0))[0];
 }
 
+const nullEvidenceResolver = { async resolve() { return { citations: [], evidence: [] }; } };
+
 export class ThoughtLayerEngine {
-  constructor({ config, provider, playbookDir, memory, governor }) {
+  constructor({ config, provider, reviewProvider, playbookDir, memory, governor, agents, apiWindows, evidenceResolver, policyEngine = new CompanyPolicyEngine() }) {
     this.config = config;
-    this.provider = provider;
     this.playbookDir = playbookDir;
     this.memory = memory;
     this.governor = governor;
     this.maxFailures = Number(config.THOUGHT_REVIEW_MAX_FAILURES || 3);
+    this.policyEngine = policyEngine;
+    const windows = apiWindows || createAgentApiWindows({
+      AGENT_A_PROVIDER: "mock",
+      AGENT_B_PROVIDER: "inherit",
+      AGENT_C_PROVIDER: "inherit",
+      AGENT_D_PROVIDER: "mock"
+    }, { b: provider, c: reviewProvider || provider });
+    this.agents = agents || {
+      a: new AAgent({ window: windows.a, policyEngine }),
+      b: new BAgent({ window: windows.b, evidenceResolver: evidenceResolver || nullEvidenceResolver }),
+      c: new CAgent({ window: windows.c, evidenceResolver: evidenceResolver || nullEvidenceResolver }),
+      d: new DAgent({ window: windows.d })
+    };
+    this.bus = new InProcessAgentBus();
+    for (const agent of Object.values(this.agents)) this.bus.register(agent);
   }
 
-  async generate({ message, identity, session, contract, playbookPrompt, branch = "initial", priorCandidate, issues }) {
-    const generationPrompt = buildGenerationPrompt({ contract, playbookPrompt, branch, priorCandidate, issues });
-    return this.provider.answer({
-      message,
-      identity,
-      session,
-      thoughtContext: { contract, generationPrompt, branch, externalReview: true }
+  async dispatch({ sessionId, from, to, type, payload, correlationId }) {
+    const response = await this.bus.send({ from, to, type, payload, correlationId });
+    await this.memory.appendEvent({
+      sessionId,
+      type: "agent_communication",
+      agentId: to,
+      correlationId,
+      payload: { from, to, messageType: type, responseAgent: response?.producedBy || response?.reviewedBy || response?.proposedBy }
     });
+    return response;
   }
 
-  async review({ contract, result, forceIndependent = false }) {
-    const view = candidateView(result);
-    const deterministic = reviewDeterministically({ candidate: view.answer, contract, citations: view.citations, grounded: view.grounded });
-    const needsIndependent = forceIndependent || deterministic.decision !== "pass" || riskAtLeast(contract.risk.level, "medium") || contract.risk.securityFlags.length > 0;
-    if (!needsIndependent) return deterministic;
+  async generate({ message, identity, session, sessionId, contract, playbookPrompt, branch = "initial", priorCandidate, issues }) {
+    const workOrder = this.agents.a.createWorkOrder({ message, identity, session, contract, playbookPrompt, branch, priorCandidate, issues });
+    return this.dispatch({ sessionId, from: AGENT_IDS.A, to: AGENT_IDS.B, type: "work_order", payload: workOrder, correlationId: contract.id });
+  }
 
-    if (typeof this.provider.review !== "function") {
-      return combineReviews(deterministic, {
-        decision: contract.risk.level === "low" ? "pass" : "escalate",
-        score: deterministic.score,
-        issues: contract.risk.level === "low" ? [] : [{ code: "independent_reviewer_unavailable", severity: "fatal", reason: "当前提供方没有独立审核能力。", repairConstraint: "转人工或启用独立审核器。" }]
-      });
+  async review({ sessionId, contract, candidate, forceIndependent = false }) {
+    const preflight = this.policyEngine.preflight({ contract, candidate });
+    if (!this.policyEngine.requiresIndependentC({ contract, preflight, forceIndependent })) {
+      return { ...candidate, review: preflight, reviewedBy: "company-policy" };
     }
-
-    const reviewPrompt = buildReviewerPrompt({ contract, candidate: view.answer, citations: view.citations, evidence: view.evidence });
-    const independent = parseModelReview(await this.provider.review({ contract, candidate: view.answer, reviewPrompt }));
-    return combineReviews(deterministic, independent);
+    const reviewed = await this.dispatch({
+      sessionId,
+      from: AGENT_IDS.A,
+      to: AGENT_IDS.C,
+      type: "review_request",
+      payload: { contract, candidate: { id: candidate.id, result: candidate.result }, preflight },
+      correlationId: contract.id
+    });
+    return { ...candidate, review: reviewed.review, reviewRun: reviewed.run };
   }
 
-  async recordAccepted({ sessionId, contract, result, review, failures }) {
-    await this.memory.appendEvent({ sessionId, type: "accepted_response", payload: { contract, result: candidateView(result), review, failures } });
+  async decide({ sessionId, contract, candidates, failures }) {
+    const decision = await this.agents.a.decide({ contract: { id: contract.id, hash: contract.hash, risk: contract.risk }, candidates, failures, maxFailures: this.maxFailures });
+    await this.memory.appendEvent({ sessionId, type: "a_decision", agentId: AGENT_IDS.A, runId: decision.run?.runId, payload: { contractId: contract.id, decision, candidates: candidates.map((item) => ({ id: item.id, branch: item.branch, review: item.review })) } });
+    return decision;
+  }
+
+  async recordAccepted({ sessionId, contract, candidate, failures, decision }) {
+    await this.memory.appendEvent({ sessionId, type: "accepted_response", payload: { contract, candidate: candidateView(candidate), review: candidate.review, decision, failures } });
     await this.memory.appendCrystal({
       sessionId,
       type: "accepted_case",
-      payload: { contractId: contract.id, contractHash: contract.hash, language: contract.language, risk: contract.risk, requirements: contract.demand.requirements, citations: result.citations || [], failures }
+      payload: { contractId: contract.id, contractHash: contract.hash, language: contract.language, risk: contract.risk, requirements: contract.demand.requirements, citations: candidate.result.citations || [], failures }
     });
     void this.governor?.recordOutcome({
       outcome: failures ? "accepted_after_rework" : "accepted_first_pass",
       riskLevel: contract.risk.level,
       sessionId,
-      evidenceIds: (result.citations || []).map((item) => item.filename).filter(Boolean)
+      evidenceIds: (candidate.result.citations || []).map((item) => item.filename).filter(Boolean),
+      stageSample: {
+        outcome: failures ? "accepted_after_rework" : "accepted_first_pass",
+        contractHash: contract.hash,
+        riskLevel: contract.risk.level,
+        riskFlags: contract.risk.flags,
+        failures,
+        selectedBranch: candidate.branch,
+        issueCodes: (candidate.review.issues || []).map((item) => item.code),
+        decisionReasons: decision.reasonCodes || []
+      }
     }).catch(() => {});
   }
 
   async answer({ message, identity, session = {}, sessionId, options = {} }) {
-    const contract = compileTaskContract({ message, session, options });
+    const contract = this.agents.a.compileContract({ message, session, options });
     const playbookPrompt = await loadAutonomyPrompt(this.playbookDir, message);
     await this.memory.appendEvent({ sessionId, type: "customer_input", payload: { message, identity: { tenantId: identity.tenantId }, contract, options } });
 
-    let result = await this.generate({ message, identity, session, contract, playbookPrompt });
-    if (result.action && result.action !== "answer") {
-      await this.memory.appendEvent({ sessionId, type: "provider_controlled_response", payload: { contractId: contract.id, action: result.action } });
-      return result;
+    let initial = await this.generate({ message, identity, session, sessionId, contract, playbookPrompt });
+    if (initial.result.action && initial.result.action !== "answer") {
+      await this.memory.appendEvent({ sessionId, type: "provider_controlled_response", payload: { contractId: contract.id, action: initial.result.action, producedBy: initial.producedBy } });
+      return initial.result;
     }
-    let review = await this.review({ contract, result });
-    let failures = review.decision === "pass" ? 0 : 1;
+    initial = await this.review({ sessionId, contract, candidate: initial });
+    let failures = initial.review.decision === "pass" ? 0 : 1;
+    let candidates = [initial];
+    let decision = await this.decide({ sessionId, contract, candidates, failures });
 
-    if (review.decision === "pass") {
+    if (decision.action === "publish") {
+      const selected = candidates.find((item) => item.id === decision.selectedCandidateId);
       session.thought = sessionThoughtState(contract, failures);
-      await this.recordAccepted({ sessionId, contract, result, review, failures });
-      return result;
+      await this.recordAccepted({ sessionId, contract, candidate: selected, failures, decision });
+      return this.policyEngine.publicProduct(selected);
     }
 
-    let priorCandidate = result.answer;
-    let latestResult = result;
-    let issues = publicIssues(review);
-    await this.memory.appendEvent({ sessionId, type: "failed_review_round", payload: { contractId: contract.id, failures, reviewed: [{ branch: "initial", result: candidateView(result), review }] } });
-    while (failures < this.maxFailures) {
-      const branches = await Promise.all([
-        this.generate({ message, identity, session, contract, playbookPrompt, branch: "fresh_1" }),
-        this.generate({ message, identity, session, contract, playbookPrompt, branch: "fresh_2" }),
-        this.generate({ message, identity, session, contract, playbookPrompt, branch: "repair", priorCandidate, issues })
+    let priorCandidate = initial.result.answer;
+    let issues = publicIssues(initial.review);
+    await this.memory.appendEvent({ sessionId, type: "failed_review_round", payload: { contractId: contract.id, failures, candidates: candidates.map((item) => ({ ...candidateView(item), review: item.review })) } });
+
+    while (decision.action === "rework" && failures < this.maxFailures) {
+      const generated = await Promise.all([
+        this.generate({ message, identity, session, sessionId, contract, playbookPrompt, branch: "fresh_1" }),
+        this.generate({ message, identity, session, sessionId, contract, playbookPrompt, branch: "fresh_2" }),
+        this.generate({ message, identity, session, sessionId, contract, playbookPrompt, branch: "repair", priorCandidate, issues })
       ]);
-      const reviewed = await Promise.all(branches.map(async (candidate, index) => ({
-        branch: ["fresh_1", "fresh_2", "repair"][index],
-        result: candidate,
-        review: await this.review({ contract, result: candidate, forceIndependent: true })
-      })));
-      const passing = reviewed.filter((item) => item.review.decision === "pass");
-      if (passing.length) {
-        const selected = chooseBest(passing);
+      candidates = await Promise.all(generated.map((candidate) => this.review({ sessionId, contract, candidate, forceIndependent: true })));
+      const hasPassing = candidates.some((item) => item.review.decision === "pass");
+      if (!hasPassing) failures += 1;
+      decision = await this.decide({ sessionId, contract, candidates, failures });
+      if (decision.action === "publish") {
+        const selected = candidates.find((item) => item.id === decision.selectedCandidateId);
         session.thought = sessionThoughtState(contract, failures);
-        await this.memory.appendEvent({ sessionId, type: "candidate_comparison", payload: { contractId: contract.id, reviewed: reviewed.map((item) => ({ branch: item.branch, result: candidateView(item.result), review: item.review })), selected: selected.branch } });
-        await this.recordAccepted({ sessionId, contract, result: selected.result, review: selected.review, failures });
-        return selected.result;
+        await this.memory.appendEvent({ sessionId, type: "candidate_comparison", payload: { contractId: contract.id, candidates: candidates.map((item) => ({ ...candidateView(item), review: item.review })), decision } });
+        await this.recordAccepted({ sessionId, contract, candidate: selected, failures, decision });
+        return this.policyEngine.publicProduct(selected);
       }
-      failures += 1;
-      const best = chooseBest(reviewed);
-      latestResult = best.result;
+      const best = bestCandidate(candidates);
       priorCandidate = best.result.answer;
       issues = publicIssues(best.review);
-      await this.memory.appendEvent({ sessionId, type: "failed_review_round", payload: { contractId: contract.id, failures, reviewed: reviewed.map((item) => ({ branch: item.branch, result: candidateView(item.result), review: item.review })) } });
+      await this.memory.appendEvent({ sessionId, type: "failed_review_round", payload: { contractId: contract.id, failures, candidates: candidates.map((item) => ({ ...candidateView(item), review: item.review })), decision } });
     }
 
+    const latest = bestCandidate(candidates);
     session.thought = sessionThoughtState(contract, failures);
     const handoffReport = {
       contractId: contract.id,
@@ -135,14 +177,30 @@ export class ThoughtLayerEngine {
       conflicting: contract.demand.requirements.filter((item) => item.status === "conflicting"),
       unknowns: contract.demand.unknowns,
       risk: contract.risk,
-      citations: latestResult.citations || [],
+      citations: latest?.result.citations || [],
       failureRounds: failures,
-      lastIssues: issues,
+      lastIssues: latest ? publicIssues(latest.review) : issues,
+      aDecision: decision,
       recommendedNextQuestions: contract.demand.unknowns.slice(0, 3)
     };
     await this.memory.appendEvent({ sessionId, type: "automatic_handoff", payload: handoffReport });
     await this.memory.appendCrystal({ sessionId, type: "handoff_summary", payload: handoffReport });
-    void this.governor?.recordOutcome({ outcome: "automatic_handoff", riskLevel: contract.risk.level, sessionId, signals: ["repeated_error"], evidenceIds: handoffReport.citations.map((item) => item.filename).filter(Boolean) }).catch(() => {});
+    void this.governor?.recordOutcome({
+      outcome: "automatic_handoff",
+      riskLevel: contract.risk.level,
+      sessionId,
+      signals: ["repeated_error"],
+      evidenceIds: handoffReport.citations.map((item) => item.filename).filter(Boolean),
+      stageSample: {
+        outcome: "automatic_handoff",
+        contractHash: contract.hash,
+        riskLevel: contract.risk.level,
+        riskFlags: contract.risk.flags,
+        failures,
+        issueCodes: handoffReport.lastIssues.map((item) => item.code),
+        decisionReasons: decision.reasonCodes || []
+      }
+    }).catch(() => {});
     return {
       action: "handoff_required",
       answer: contract.language.output === "en"
@@ -152,6 +210,10 @@ export class ThoughtLayerEngine {
       citations: [],
       handoffReport
     };
+  }
+
+  async analyzeStage(snapshot) {
+    return this.bus.send({ from: AGENT_IDS.A, to: AGENT_IDS.D, type: "stage_snapshot", payload: snapshot, correlationId: snapshot.id || "stage" });
   }
 
   recordGovernanceSignal({ sessionId, signal, riskLevel = "critical" }) {

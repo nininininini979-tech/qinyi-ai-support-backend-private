@@ -13,8 +13,19 @@ import { SupportService } from "./support/service.js";
 import { ThoughtLayerEngine } from "./thought-layer/engine.js";
 import { createThoughtMemory } from "./thought-layer/memory.js";
 import { createStageGovernor } from "./thought-layer/governance.js";
+import { createAgentApiWindows } from "./agent-company/api-windows.js";
+import { LocalEvidenceResolver } from "./agent-company/evidence.js";
+import { OperatorControlPlane } from "./control-plane/operator-service.js";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+function createSupportProvider(config, { knowledgeDir, playbookDir }) {
+  return config.SUPPORT_PROVIDER === "openai"
+    ? new OpenAISupportProvider(config, { playbookDir })
+    : config.SUPPORT_PROVIDER === "deepseek"
+      ? new DeepSeekSupportProvider(config, { knowledgeDir, playbookDir })
+      : new MockSupportProvider({ knowledgeDir });
+}
 const sessionIdSchema = z.string().max(16_000).refine(
   (value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value) || /^v1(?:\.[A-Za-z0-9_-]+){3}$/.test(value),
   "会话标识无效。"
@@ -88,18 +99,26 @@ export async function buildApp(config) {
   });
   const sessionStore = await createSessionStore(config);
   const thoughtMemory = await createThoughtMemory(config, rootDir);
-  const stageGovernor = await createStageGovernor(config, rootDir);
   const knowledgeDir = path.join(rootDir, "knowledge", process.env.VERCEL ? "curated" : "prepared");
   const playbookDir = path.join(rootDir, "service-playbook");
-  const baseProvider = config.SUPPORT_PROVIDER === "openai"
-    ? new OpenAISupportProvider(config, { playbookDir })
-    : config.SUPPORT_PROVIDER === "deepseek"
-      ? new DeepSeekSupportProvider(config, { knowledgeDir, playbookDir })
-      : new MockSupportProvider({ knowledgeDir });
-  const provider = config.THOUGHT_LAYER_ENABLED
-    ? new ThoughtLayerEngine({ config, provider: baseProvider, playbookDir, memory: thoughtMemory, governor: stageGovernor })
-    : baseProvider;
-  const support = new SupportService({ config, sessionStore, provider, handoff: new DemoHandoffAdapter() });
+  const bProvider = createSupportProvider(config, { knowledgeDir, playbookDir });
+  const cProvider = createSupportProvider(config, { knowledgeDir, playbookDir });
+  const apiWindows = createAgentApiWindows(config, { b: bProvider, c: cProvider });
+  const stageGovernor = await createStageGovernor(config, rootDir);
+  const provider = new ThoughtLayerEngine({
+    config,
+    provider: bProvider,
+    reviewProvider: cProvider,
+    apiWindows,
+    evidenceResolver: new LocalEvidenceResolver({ knowledgeDir }),
+    playbookDir,
+    memory: thoughtMemory,
+    governor: stageGovernor
+  });
+  stageGovernor.setStageAnalyzer((snapshot) => provider.analyzeStage(snapshot));
+  const operatorControl = new OperatorControlPlane({ mode: config.OPERATOR_MODE, agents: provider.agents });
+  app.decorate("operatorControl", operatorControl);
+  const support = new SupportService({ config, sessionStore, provider, handoff: new DemoHandoffAdapter(), operatorControl });
 
   await app.register(rateLimit, {
     max: config.RATE_LIMIT_MAX,
@@ -133,7 +152,9 @@ export async function buildApp(config) {
     aiEnabled: config.AI_SERVICE_ENABLED,
     publicMode: config.AUTH_MODE === "public",
     sessionBackend: config.SESSION_BACKEND,
-    model: config.SUPPORT_PROVIDER === "openai" ? config.OPENAI_MODEL : config.SUPPORT_PROVIDER === "deepseek" ? config.DEEPSEEK_MODEL : undefined
+    model: config.SUPPORT_PROVIDER === "openai" ? config.OPENAI_MODEL : config.SUPPORT_PROVIDER === "deepseek" ? config.DEEPSEEK_MODEL : undefined,
+    operatorMode: operatorControl.mode,
+    agentCompany: true
   }));
 
   app.post("/api/support/chat", async (request, reply) => {

@@ -10,11 +10,13 @@ test("local total memory encrypts raw events, supports audited rehydration, and 
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const memory = new LocalThoughtMemory({ directory, secret: "0123456789abcdef0123456789abcdef" });
   await memory.initialize();
-  await memory.appendEvent({ sessionId: "session-a", type: "customer_input", payload: { message: "电话13800138000" } });
+  await memory.appendEvent({ sessionId: "session-a", type: "customer_input", agentId: "agent-b", runId: "run-1", payload: { message: "电话13800138000" } });
   await memory.appendCrystal({ sessionId: "session-a", type: "summary", payload: { message: "联系人：张三，电话13800138000，座机021-12345678，订单ORD-SECRET-9，地址：上海市测试路1号" } });
 
   const disk = await fs.readFile(path.join(directory, "total-events.jsonl"), "utf8");
   assert.doesNotMatch(disk, /13800138000/);
+  assert.match(disk, /"agentId":"agent-b"/);
+  assert.match(disk, /"runId":"run-1"/);
   const crystal = await fs.readFile(path.join(directory, "instant-crystals.jsonl"), "utf8");
   assert.doesNotMatch(crystal, /张三|021-12345678|ORD-SECRET-9|上海市测试路1号/);
   await assert.rejects(() => memory.readSessionRaw({ sessionId: "session-a", reason: "marketing" }));

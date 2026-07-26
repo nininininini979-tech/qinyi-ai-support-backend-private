@@ -31,13 +31,33 @@ const schema = z.object({
   RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(1000).default(30),
   RATE_LIMIT_WINDOW: z.string().default("1 minute"),
   REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(25000),
-  THOUGHT_LAYER_ENABLED: bool.default("true"),
   THOUGHT_REVIEW_MAX_FAILURES: z.coerce.number().int().min(1).max(3).default(3),
   THOUGHT_MEMORY_ENABLED: bool,
   THOUGHT_MEMORY_DIR: z.string().default("data/runtime/thought-layer"),
   THOUGHT_MEMORY_SECRET: z.string().optional(),
   THOUGHT_STAGE_CONVERSATIONS: z.coerce.number().int().min(10).max(10000).default(100),
-  THOUGHT_STAGE_DAYS: z.coerce.number().int().min(1).max(90).default(7)
+  THOUGHT_STAGE_DAYS: z.coerce.number().int().min(1).max(90).default(7),
+  OPERATOR_MODE: z.enum(["observe", "draft", "auto", "paused"]).default("auto"),
+  AGENT_A_PROVIDER: z.enum(["mock", "openai-compatible"]).default("mock"),
+  AGENT_A_API_KEY: z.string().optional(),
+  AGENT_A_BASE_URL: z.string().url().default("https://api.openai.com/v1"),
+  AGENT_A_MODEL: z.string().default("a-local-placeholder"),
+  AGENT_A_CHARTER_VERSION: z.string().default("a-charter-v1"),
+  AGENT_B_PROVIDER: z.enum(["inherit", "mock", "openai-compatible"]).default("inherit"),
+  AGENT_B_API_KEY: z.string().optional(),
+  AGENT_B_BASE_URL: z.string().url().default("https://api.openai.com/v1"),
+  AGENT_B_MODEL: z.string().default("b-local-placeholder"),
+  AGENT_B_CHARTER_VERSION: z.string().default("b-charter-v1"),
+  AGENT_C_PROVIDER: z.enum(["inherit", "mock", "openai-compatible"]).default("inherit"),
+  AGENT_C_API_KEY: z.string().optional(),
+  AGENT_C_BASE_URL: z.string().url().default("https://api.openai.com/v1"),
+  AGENT_C_MODEL: z.string().default("c-local-placeholder"),
+  AGENT_C_CHARTER_VERSION: z.string().default("c-charter-v1"),
+  AGENT_D_PROVIDER: z.enum(["mock", "openai-compatible"]).default("mock"),
+  AGENT_D_API_KEY: z.string().optional(),
+  AGENT_D_BASE_URL: z.string().url().default("https://api.openai.com/v1"),
+  AGENT_D_MODEL: z.string().default("d-local-placeholder"),
+  AGENT_D_CHARTER_VERSION: z.string().default("d-charter-v1")
 });
 
 export function loadConfig(env = process.env) {
@@ -52,6 +72,11 @@ export function loadConfig(env = process.env) {
   }
   if (config.THOUGHT_MEMORY_ENABLED && (!config.THOUGHT_MEMORY_SECRET || config.THOUGHT_MEMORY_SECRET.length < 32)) {
     throw new Error("THOUGHT_MEMORY_ENABLED=true requires THOUGHT_MEMORY_SECRET with at least 32 characters");
+  }
+  for (const role of ["A", "B", "C", "D"]) {
+    if (config[`AGENT_${role}_PROVIDER`] === "openai-compatible" && !config[`AGENT_${role}_API_KEY`]) {
+      throw new Error(`AGENT_${role}_PROVIDER=openai-compatible requires AGENT_${role}_API_KEY`);
+    }
   }
   if (config.NODE_ENV === "production") {
     if (config.AUTH_MODE === "demo") throw new Error("AUTH_MODE=demo is forbidden in production");

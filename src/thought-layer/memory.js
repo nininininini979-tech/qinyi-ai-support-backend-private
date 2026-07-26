@@ -79,9 +79,9 @@ export class LocalThoughtMemory {
     await fs.mkdir(this.directory, { recursive: true, mode: 0o700 });
   }
 
-  async appendEvent({ sessionId, type, payload, at = new Date().toISOString() }) {
+  async appendEvent({ sessionId, type, payload, agentId = "system", runId, parentRunId, correlationId, at = new Date().toISOString() }) {
     const session = this.sessionFingerprint(sessionId);
-    await appendLine(this.eventsFile, { id: crypto.randomUUID(), session, type, at, encrypted: encrypt(payload, this.key) });
+    await appendLine(this.eventsFile, { id: crypto.randomUUID(), session, type, agentId, runId, parentRunId, correlationId, at, encrypted: encrypt(payload, this.key) });
   }
 
   async appendCrystal({ sessionId, type, payload, sourceEventIds = [], at = new Date().toISOString() }) {

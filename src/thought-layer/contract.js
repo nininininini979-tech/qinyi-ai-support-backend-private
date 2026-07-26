@@ -49,8 +49,9 @@ export const taskContractSchema = z.object({
     urgency: z.enum(["normal", "urgent"]),
     returningCustomer: z.boolean()
   }),
+  c2: z.record(z.unknown()),
   acceptance: z.array(z.object({ id: z.string(), severity: z.enum(["fatal", "major", "minor"]), criterion: z.string() })),
-  provenance: z.object({ policyVersion: z.string(), b1Version: z.string(), c1Version: z.string() })
+  provenance: z.object({ policyVersion: z.string(), aVersion: z.string(), b1Version: z.string(), c1Version: z.string(), dVersion: z.string() })
 });
 
 const UNKNOWN_FIELDS = ["use_case", "procurement_quantity", "dimensions", "material", "process", "packaging", "destination", "delivery_date"];
@@ -73,8 +74,12 @@ function resolveOutputLanguage(input, options, previous, message) {
 }
 
 function collectMatches(message, kind, pattern) {
-  const values = [...String(message).matchAll(pattern)].map((match) => match[0].trim());
-  return [...new Set(values)].map((value) => ({ kind, value }));
+  const source = String(message);
+  const values = [...source.matchAll(pattern)].map((match) => ({
+    value: match[0].trim(),
+    provisional: /(?:大约|大概|约|预计|可能|暂定|around|about|approximately|maybe)\s*$/i.test(source.slice(Math.max(0, match.index - 16), match.index))
+  }));
+  return [...new Map(values.map((item) => [item.value, item])).values()].map((item) => ({ kind, ...item }));
 }
 
 function extractRequirements(message) {
@@ -94,7 +99,7 @@ function mergeRequirements(previous = [], extracted = [], turn = 0) {
     for (const item of next) {
       if (item.kind === kind && item.status === "confirmed") item.status = "superseded";
     }
-    const status = values.length > 1 ? "conflicting" : "confirmed";
+    const status = values.length > 1 ? "conflicting" : values[0].provisional ? "provisional" : "confirmed";
     for (const [index, item] of values.entries()) {
       next.push({ id: `${kind}-${turn}-${index}`, ...item, status, source: "customer", turn });
     }
@@ -159,6 +164,7 @@ export function compileTaskContract({ message, session = {}, options = {}, now =
       urgency: options.urgency || "normal",
       returningCustomer: Boolean(options.returningCustomer)
     },
+    c2: {},
     acceptance: [
       { id: "semantic-fidelity", severity: "fatal", criterion: "Preserve confirmed requirements, quantities, units, conditions, and uncertainty." },
       { id: "evidence-boundary", severity: "fatal", criterion: "Do not add company facts or feasibility claims without trusted evidence." },
@@ -166,7 +172,7 @@ export function compileTaskContract({ message, session = {}, options = {}, now =
       { id: "demand-supply-interface", severity: "major", criterion: "Connect demand and supply only at evidence-supported interface points." },
       { id: "customer-utility", severity: "minor", criterion: "Provide a clear primary direction, at most one alternative, and the smallest useful next step." }
     ],
-    provenance: { policyVersion: "thought-layer-a1", b1Version: "b1-2026-07-26", c1Version: "c1-2026-07-26" }
+    provenance: { policyVersion: "company-policy-v1", aVersion: "a-charter-v1", b1Version: "b-charter-v1", c1Version: "c-charter-v1", dVersion: "d-charter-v1" }
   };
   const hash = contractHash({ ...body, createdAt: undefined });
   return taskContractSchema.parse({ id: `contract-${hash.slice(0, 16)}`, hash, ...body });

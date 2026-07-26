@@ -20,7 +20,7 @@ export function evaluateStageTrigger({ completedConversations = 0, lastEvaluatio
   };
 }
 
-export function createStageCandidate({ trigger, metrics, evidenceIds = [], currentVersion }) {
+export function createStageCandidate({ trigger, metrics, evidenceIds = [], currentVersion, analysis }) {
   return {
     id: `stage-candidate-${new Date().toISOString().replace(/[:.]/g, "-")}`,
     status: "awaiting_human_approval",
@@ -28,6 +28,7 @@ export function createStageCandidate({ trigger, metrics, evidenceIds = [], curre
     currentVersion,
     metrics,
     evidenceIds,
+    analysis,
     requiredChecks: ["held_out_evaluation", "high_risk_regression", "latency_and_cost", "privacy_review", "rollback_target"],
     activationRule: "Never update a running session. Publish only after human approval."
   };
@@ -37,7 +38,7 @@ async function readState(filename) {
   try {
     return JSON.parse(await fs.readFile(filename, "utf8"));
   } catch (error) {
-    if (error.code === "ENOENT") return { completedConversations: 0, countedSessions: {}, outcomes: {}, risks: {}, lastEvaluationAt: null };
+    if (error.code === "ENOENT") return { completedConversations: 0, countedSessions: {}, outcomes: {}, risks: {}, samples: [], lastEvaluationAt: null };
     throw error;
   }
 }
@@ -51,11 +52,12 @@ async function atomicJson(filename, value) {
 export class NullStageGovernor {
   async initialize() {}
   async recordOutcome() { return null; }
+  setStageAnalyzer() {}
   async close() {}
 }
 
 export class LocalStageGovernor {
-  constructor({ directory, conversationThreshold = 100, dayThreshold = 7 }) {
+  constructor({ directory, conversationThreshold = 100, dayThreshold = 7, stageAnalyzer }) {
     this.directory = directory;
     this.stateFile = path.join(directory, "stage-state.json");
     this.proposalDir = path.join(directory, "proposals");
@@ -63,6 +65,7 @@ export class LocalStageGovernor {
     this.dayThreshold = dayThreshold;
     this.queue = Promise.resolve();
     this.scheduleTimer = null;
+    this.stageAnalyzer = stageAnalyzer;
   }
 
   async initialize() {
@@ -80,10 +83,15 @@ export class LocalStageGovernor {
     return this.queue;
   }
 
-  async recordOutcomeSerial({ outcome, riskLevel = "low", evidenceIds = [], signals = [], currentVersion = "thought-layer-a1", sessionId, validConversation = true }) {
+  setStageAnalyzer(stageAnalyzer) {
+    this.stageAnalyzer = stageAnalyzer;
+  }
+
+  async recordOutcomeSerial({ outcome, riskLevel = "low", evidenceIds = [], signals = [], currentVersion = "company-policy-v1", sessionId, validConversation = true, stageSample }) {
     const state = await readState(this.stateFile);
     if (!state.lastEvaluationAt) state.lastEvaluationAt = new Date().toISOString();
     state.countedSessions ||= {};
+    state.samples ||= [];
     const sessionKey = sessionId ? crypto.createHash("sha256").update(String(sessionId)).digest("hex") : crypto.randomUUID();
     if (validConversation && !state.countedSessions[sessionKey]) {
       state.countedSessions[sessionKey] = true;
@@ -93,6 +101,8 @@ export class LocalStageGovernor {
       state.outcomes[outcome] = Number(state.outcomes[outcome] || 0) + 1;
       state.risks[riskLevel] = Number(state.risks[riskLevel] || 0) + 1;
     }
+    if (stageSample) state.samples.push(stageSample);
+    state.samples = state.samples.slice(-100);
     const trigger = evaluateStageTrigger({
       completedConversations: state.completedConversations,
       lastEvaluationAt: state.lastEvaluationAt,
@@ -102,17 +112,28 @@ export class LocalStageGovernor {
     });
     let candidate = null;
     if (trigger.shouldCreateCandidate) {
-      candidate = createStageCandidate({
+      const snapshot = {
+        id: `stage-snapshot-${crypto.randomUUID()}`,
         trigger,
         metrics: { completedConversations: state.completedConversations, outcomes: state.outcomes, risks: state.risks },
         evidenceIds,
-        currentVersion
+        currentVersion,
+        samples: state.samples
+      };
+      const analysis = this.stageAnalyzer ? await this.stageAnalyzer(snapshot) : undefined;
+      candidate = createStageCandidate({
+        trigger,
+        metrics: snapshot.metrics,
+        evidenceIds,
+        currentVersion,
+        analysis
       });
       await atomicJson(path.join(this.proposalDir, `${candidate.id}.json`), candidate);
       state.completedConversations = 0;
       state.countedSessions = {};
       state.outcomes = {};
       state.risks = {};
+      state.samples = [];
       state.lastEvaluationAt = new Date().toISOString();
     }
     await atomicJson(this.stateFile, state);

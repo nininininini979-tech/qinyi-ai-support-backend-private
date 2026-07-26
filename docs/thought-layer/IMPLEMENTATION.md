@@ -1,15 +1,16 @@
 # AI 客服共享思想层
 
-本目录把《转译框架》及其分析哲学表达落到勤益印刷 AI 客服。运行时实现不把所有规则塞进一个超长 system prompt，而是把合同、生成、审核、记忆和治理分开。
+本目录把《转译框架》及其分析哲学表达落到勤益印刷 AI 客服。当前运行时使用四个身份隔离的 Agent 实例和不可绕过的公司准入层；本地开发可以同进程运行，但不再由一个 provider 对象依次扮演全部岗位。完整组织边界见 [`AGENT_COMPANY.md`](./AGENT_COMPANY.md)。
 
 ## 角色映射
 
 | 角色 | 代码位置 | 运行职责 |
 |---|---|---|
-| A | `src/thought-layer/contract.js`、`engine.js` | 编译动态合同、冻结硬条件、编排 B/C、裁决发送或转人工 |
-| B1/B2 | `src/thought-layer/prompts.js` | B1 保存不可覆盖的事实纪律；B2 只接收 allowlist 任务选项 |
-| C1/C2 | `src/thought-layer/reviewer.js`、provider `review()` | 确定性硬门槛始终运行；高风险或失败时启动独立模型审核 |
-| D | `src/thought-layer/governance.js` | 每周或每 100 次有效对话生成候选治理文件，等待人工批准 |
+| A | `src/agent-company/agents.js` | 编译动态合同、签发 B/C/D 工作信封、留下结构化裁决 |
+| B1/B2 | `src/agent-company/agents.js`、`prompts.js` | 只按 B 岗位规则、合同和允许证据生成，不读取 A 治理提示 |
+| C1/C2 | `src/agent-company/agents.js`、`reviewer.js` | 从独立窗口审核匿名候选；C2 当前为空，留待经营要求填写 |
+| D | `src/agent-company/agents.js`、`governance.js` | 独立分析阶段快照，提案固定等待人工批准 |
+| 公司制度 | `src/agent-company/protocol.js`、`company-policy.js` | 限制部门通信并阻止未通过 C 的产品发布 |
 | 总库/L2 | `src/thought-layer/memory.js` | 本地 AES-GCM 加密的完整可观察事件档案 |
 | 即时库/L1 | `instant-crystals.jsonl` | 脱敏、可调用、可删除的合同和结果结晶 |
 
@@ -40,7 +41,7 @@ Fresh 分支不接触旧稿和审核原因；Repair 只获得 A 过滤后的结�
 
 ## Provider 边界
 
-DeepSeek、OpenAI 和 Mock 均由 `ThoughtLayerEngine` 调用。共享层负责合同、提示词、审核、返工和日志；provider 只负责模型/工具调用和返回候选。旧的 provider 直接调用仍保留兼容回退，但 `buildApp()` 默认启用共享思想层。
+DeepSeek、OpenAI 和 Mock 现在只作为 Agent API 窗口后的执行适配器。`buildApp()` 始终经过 Agent 公司和公司准入层，不再提供关闭思想层后直接发布 provider 输出的旁路。
 
 OpenAI 可继续使用 `file_search`；DeepSeek/Mock 继续使用本地检索。审核结果必须使用同一结构：`decision`、`score`、`issues`。
 
@@ -91,6 +92,7 @@ THOUGHT_MEMORY_DIR=data/runtime/thought-layer
 
 - [完整转译框架](./转译框架.md)
 - [分析哲学表达](./转译框架_分析哲学表达.md)
+- [ABCD Agent 公司骨架](./AGENT_COMPANY.md)
 - `src/thought-layer/prompts.js`：A/B1/C1/D 的可执行提示词。
 - `src/thought-layer/contract.js`：动态合同与状态迁移。
 - `src/thought-layer/engine.js`：普通 B、高风险 C、三路返工和人工接管。

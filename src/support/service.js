@@ -2,11 +2,12 @@ import { classifyMessage, POLICY } from "./policy.js";
 import { newSessionId } from "../stores/session-store.js";
 
 export class SupportService {
-  constructor({ config, sessionStore, provider, handoff }) {
+  constructor({ config, sessionStore, provider, handoff, operatorControl }) {
     this.config = config;
     this.sessionStore = sessionStore;
     this.provider = provider;
     this.handoff = handoff;
+    this.operatorControl = operatorControl;
   }
 
   async chat({ identity, sessionId, message, options = {} }) {
@@ -33,7 +34,8 @@ export class SupportService {
         citations: []
       };
     }
-    if (!this.config.AI_SERVICE_ENABLED || policy.action === "handoff") {
+    const operatorRequiresHuman = this.operatorControl && this.operatorControl.mode !== "auto";
+    if (!this.config.AI_SERVICE_ENABLED || operatorRequiresHuman || policy.action === "handoff") {
       if (policy.reason === "restricted_business" && /投诉|complaint/i.test(message) && typeof this.provider.recordGovernanceSignal === "function") {
         void this.provider.recordGovernanceSignal({ sessionId, signal: "major_complaint" })?.catch(() => {});
       }
@@ -47,14 +49,16 @@ export class SupportService {
           citations: []
         };
       }
-      const reason = this.config.AI_SERVICE_ENABLED ? policy.reason : "kill_switch";
+      const reason = !this.config.AI_SERVICE_ENABLED ? "kill_switch" : operatorRequiresHuman ? `operator_mode_${this.operatorControl.mode}` : policy.reason;
       const ticket = await this.handoff.create({ ...identity, sessionId, reason, unresolvedQuestion: message });
       session.handoffTicketId = ticket.id;
       sessionId = (await this.sessionStore.save(identity.tenantId, identity.userId, sessionId, session)) || sessionId;
       return {
         sessionId,
         action: "handoff",
-        answer: policy.reason === "restricted_business"
+        answer: operatorRequiresHuman
+          ? "当前由人工审核和接管回复，我已为你建立人工服务请求。"
+          : policy.reason === "restricted_business"
           ? "这项业务需要人工客服核验和处理，我已为你建立人工服务请求。"
           : "已为你建立人工服务请求，客服会按队列继续处理。",
         ticketId: ticket.id,
