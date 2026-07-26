@@ -2,6 +2,8 @@
 
 这是一个可落地运行的知识库客服起步项目，提供 Web 对话页、知识库检索、订单查询工具、人工转接策略、会话隔离和三种模型提供方。当前本机选择的是 **DeepSeek**；`.env.example` 仍以无需密钥的 `mock` 作为新环境默认值。
 
+项目现已加入 provider 无关的 A/B/C/D 共享思想层：A 编译动态语义合同，普通咨询只运行 B，高风险或首次失败时启动独立 C；三轮失败后生成结构化人工交接报告；D 只生成待人工审批的阶段候选。完整设计见 [`docs/thought-layer/IMPLEMENTATION.md`](docs/thought-layer/IMPLEMENTATION.md)。
+
 > 本项目当前是开发/验收版本。订单、人工工单均为演示适配器，不能直接承担真实业务。
 
 ## 架构与数据流
@@ -25,10 +27,12 @@ knowledge/curated/ --审核/清理--> knowledge/prepared/ --本地读取或上�
 - `src/providers/`：`mock`、DeepSeek、OpenAI 实现。
 - `src/retrieval/`：DeepSeek/mock 使用的本地关键词检索。
 - `src/support/`：客服回答边界、转人工策略和会话流程。
+- `src/thought-layer/`：动态合同、需求—供给接口化、共享提示词、独立审核、三路返工、双层记忆和 D 治理。
 - `src/adapters/`：订单与人工工单的演示实现。
 - `knowledge/curated/`：人工筛选、可追溯的发布源。
 - `knowledge/prepared/`：校验后生成的运行副本，已被 Git 忽略。
 - `service-playbook/`：从真实客服对话中脱敏蒸馏的回复结构、自主权限和训练样例，不进入事实知识库。
+- `docs/thought-layer/`：完整转译框架、分析哲学表达和本项目接入规范。
 - `scripts/`：知识校验准备及 OpenAI Vector Store 上传。
 - `test/`：基于 Node Test Runner 的单元和接口测试。
 

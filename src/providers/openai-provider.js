@@ -51,8 +51,9 @@ export class OpenAISupportProvider {
     ];
   }
 
-  async answer({ message, identity, session }) {
-    const playbookPrompt = await loadAutonomyPrompt(this.playbookDir, buildRetrievalQuery(message, session.history || []));
+  async answer({ message, identity, session, thoughtContext }) {
+    const playbookPrompt = thoughtContext?.generationPrompt ? "" : await loadAutonomyPrompt(this.playbookDir, buildRetrievalQuery(message, session.history || []));
+    const instructions = thoughtContext?.generationPrompt || `${SUPPORT_INSTRUCTIONS}\n${playbookPrompt}`;
     const safetyId = safetyIdentifier(this.config.USER_HASH_SECRET, identity.tenantId, identity.userId);
     const history = (session.history || []).slice(-8).flatMap((turn) => [
       { role: "user", content: turn.user },
@@ -61,11 +62,12 @@ export class OpenAISupportProvider {
     let input = [...history, { role: "user", content: message }];
     let previousResponseId = this.config.OPENAI_STORE ? session.lastResponseId : undefined;
     let response;
+    let usedTrustedTool = false;
 
     for (let toolRound = 0; toolRound < 4; toolRound += 1) {
       response = await this.client.responses.create({
         model: this.config.OPENAI_MODEL,
-        instructions: `${SUPPORT_INSTRUCTIONS}\n${playbookPrompt}`,
+        instructions,
         input,
         previous_response_id: previousResponseId || undefined,
         tools: this.tools,
@@ -91,6 +93,7 @@ export class OpenAISupportProvider {
           result = call.name === "get_order_status"
             ? await getOrderStatus({ orderId: args.order_id, ...identity })
             : { error: "不支持的工具。" };
+          if (call.name === "get_order_status" && !result.error) usedTrustedTool = true;
         } catch {
           result = { error: "工具参数无效。" };
         }
@@ -107,6 +110,7 @@ export class OpenAISupportProvider {
 
     if (!response?.output_text) throw new Error("Model returned no final answer");
     const citations = citationsFrom(response);
+    if (usedTrustedTool) citations.push({ filename: "trusted-tool:get_order_status", title: "订单系统" });
     return {
       action: "answer",
       answer: toPlainText(response.output_text),
@@ -114,5 +118,19 @@ export class OpenAISupportProvider {
       citations,
       responseId: response.id
     };
+  }
+
+  async review({ reviewPrompt }) {
+    const response = await this.client.responses.create({
+      model: this.config.OPENAI_MODEL,
+      instructions: reviewPrompt,
+      input: "请执行独立审核并只返回规定的 JSON。",
+      tools: this.tools.filter((tool) => tool.type === "file_search"),
+      max_output_tokens: 900,
+      reasoning: { effort: this.config.OPENAI_REASONING_EFFORT },
+      text: { verbosity: "low" },
+      store: false
+    });
+    return response.output_text || "";
   }
 }

@@ -30,7 +30,14 @@ const schema = z.object({
   MAX_MESSAGE_CHARS: z.coerce.number().int().min(100).max(10000).default(2000),
   RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(1000).default(30),
   RATE_LIMIT_WINDOW: z.string().default("1 minute"),
-  REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(25000)
+  REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(25000),
+  THOUGHT_LAYER_ENABLED: bool.default("true"),
+  THOUGHT_REVIEW_MAX_FAILURES: z.coerce.number().int().min(1).max(3).default(3),
+  THOUGHT_MEMORY_ENABLED: bool,
+  THOUGHT_MEMORY_DIR: z.string().default("data/runtime/thought-layer"),
+  THOUGHT_MEMORY_SECRET: z.string().optional(),
+  THOUGHT_STAGE_CONVERSATIONS: z.coerce.number().int().min(10).max(10000).default(100),
+  THOUGHT_STAGE_DAYS: z.coerce.number().int().min(1).max(90).default(7)
 });
 
 export function loadConfig(env = process.env) {
@@ -42,6 +49,9 @@ export function loadConfig(env = process.env) {
   }
   if (config.SUPPORT_PROVIDER === "deepseek" && !config.DEEPSEEK_API_KEY) {
     throw new Error("SUPPORT_PROVIDER=deepseek requires DEEPSEEK_API_KEY");
+  }
+  if (config.THOUGHT_MEMORY_ENABLED && (!config.THOUGHT_MEMORY_SECRET || config.THOUGHT_MEMORY_SECRET.length < 32)) {
+    throw new Error("THOUGHT_MEMORY_ENABLED=true requires THOUGHT_MEMORY_SECRET with at least 32 characters");
   }
   if (config.NODE_ENV === "production") {
     if (config.AUTH_MODE === "demo") throw new Error("AUTH_MODE=demo is forbidden in production");

@@ -10,16 +10,31 @@ import { OpenAISupportProvider } from "./providers/openai-provider.js";
 import { DeepSeekSupportProvider } from "./providers/deepseek-provider.js";
 import { DemoHandoffAdapter } from "./adapters/handoff.js";
 import { SupportService } from "./support/service.js";
+import { ThoughtLayerEngine } from "./thought-layer/engine.js";
+import { createThoughtMemory } from "./thought-layer/memory.js";
+import { createStageGovernor } from "./thought-layer/governance.js";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sessionIdSchema = z.string().max(16_000).refine(
   (value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value) || /^v1(?:\.[A-Za-z0-9_-]+){3}$/.test(value),
   "会话标识无效。"
 );
+const chatOptionsSchema = z.object({
+  outputLanguage: z.enum(["auto", "zh-CN", "en"]).default("auto"),
+  bilingual: z.boolean().default(false),
+  audienceLevel: z.enum(["lay", "informed", "expert"]).default("informed"),
+  customerType: z.enum(["factory", "organization", "buyer", "unknown"]).default("organization"),
+  country: z.string().trim().max(80).optional(),
+  channel: z.enum(["web", "sales", "email", "other"]).default("web"),
+  budgetBand: z.enum(["unknown", "value", "standard", "premium"]).default("unknown"),
+  urgency: z.enum(["normal", "urgent"]).default("normal"),
+  returningCustomer: z.boolean().default(false)
+}).strict();
 const chatSchema = z.object({
   sessionId: sessionIdSchema.optional(),
-  message: z.string().trim().min(1)
-});
+  message: z.string().trim().min(1),
+  options: chatOptionsSchema.optional()
+}).strict();
 const handoffSchema = z.object({ message: z.string().trim().max(2000).optional() });
 const feedbackSchema = z.object({ sessionId: sessionIdSchema, rating: z.enum(["up", "down"]), reason: z.string().trim().max(500).optional() });
 
@@ -72,13 +87,18 @@ export async function buildApp(config) {
     }
   });
   const sessionStore = await createSessionStore(config);
+  const thoughtMemory = await createThoughtMemory(config, rootDir);
+  const stageGovernor = await createStageGovernor(config, rootDir);
   const knowledgeDir = path.join(rootDir, "knowledge", process.env.VERCEL ? "curated" : "prepared");
   const playbookDir = path.join(rootDir, "service-playbook");
-  const provider = config.SUPPORT_PROVIDER === "openai"
+  const baseProvider = config.SUPPORT_PROVIDER === "openai"
     ? new OpenAISupportProvider(config, { playbookDir })
     : config.SUPPORT_PROVIDER === "deepseek"
       ? new DeepSeekSupportProvider(config, { knowledgeDir, playbookDir })
       : new MockSupportProvider({ knowledgeDir });
+  const provider = config.THOUGHT_LAYER_ENABLED
+    ? new ThoughtLayerEngine({ config, provider: baseProvider, playbookDir, memory: thoughtMemory, governor: stageGovernor })
+    : baseProvider;
   const support = new SupportService({ config, sessionStore, provider, handoff: new DemoHandoffAdapter() });
 
   await app.register(rateLimit, {
@@ -128,6 +148,7 @@ export async function buildApp(config) {
     const identity = identityFor(request, config);
     const deleted = await sessionStore.delete(identity.tenantId, identity.userId, sessionId);
     if (!deleted) return reply.code(404).send({ error: "会话不存在、已过期或不属于当前用户。", requestId: request.id });
+    await thoughtMemory.deleteSession(sessionId);
     return reply.code(204).send();
   });
 
@@ -155,6 +176,10 @@ export async function buildApp(config) {
     reply.code(statusCode).send({ error: statusCode >= 500 ? "服务繁忙，请稍后再试。" : error.message, requestId: request.id });
   });
 
-  app.addHook("onClose", async () => sessionStore.close());
+  app.addHook("onClose", async () => {
+    await thoughtMemory.close();
+    await stageGovernor.close();
+    await sessionStore.close();
+  });
   return app;
 }

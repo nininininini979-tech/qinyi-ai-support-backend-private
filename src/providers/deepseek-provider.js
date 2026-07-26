@@ -42,7 +42,7 @@ export class DeepSeekSupportProvider {
     this.client = new OpenAI({ apiKey: config.DEEPSEEK_API_KEY, baseURL: config.DEEPSEEK_BASE_URL, timeout: config.REQUEST_TIMEOUT_MS, maxRetries: 1 });
   }
 
-  async answer({ message, identity, session }) {
+  async answer({ message, identity, session, thoughtContext }) {
     const chunks = await loadKnowledge(this.knowledgeDir);
     const retrievalQuery = buildRetrievalQuery(message, session.history || []);
     const retrieved = retrieveKnowledge(chunks, retrievalQuery, 5);
@@ -56,9 +56,10 @@ export class DeepSeekSupportProvider {
       { role: "user", content: turn.user },
       { role: "assistant", content: turn.assistant }
     ]);
-    const playbookPrompt = await loadAutonomyPrompt(this.playbookDir, retrievalQuery);
+    const playbookPrompt = thoughtContext?.generationPrompt ? "" : await loadAutonomyPrompt(this.playbookDir, retrievalQuery);
+    const systemPrompt = thoughtContext?.generationPrompt || `${SUPPORT_INSTRUCTIONS}\n${playbookPrompt}\n不得使用模型自身知识补充公司事实。产品建议必须能在提供的知识片段中找到依据。回答末尾不要编造来源列表，来源由应用界面单独展示。`;
     const messages = [
-      { role: "system", content: `${SUPPORT_INSTRUCTIONS}\n${playbookPrompt}\n不得使用模型自身知识补充公司事实。产品建议必须能在提供的知识片段中找到依据。回答末尾不要编造来源列表，来源由应用界面单独展示。` },
+      { role: "system", content: systemPrompt },
       ...(matches.length ? [{ role: "system", content: contextMessage(matches) }] : []),
       ...prior,
       { role: "user", content: message }
@@ -88,7 +89,7 @@ export class DeepSeekSupportProvider {
         }
         const answer = assistant.content ? toPlainText(assistant.content) : "";
         if (!answer) throw new Error("DeepSeek returned no final answer");
-        const answerIssues = reviewProductAnswer(answer);
+        const answerIssues = thoughtContext?.externalReview ? [] : reviewProductAnswer(answer);
         if (answerIssues.length && round < 3) {
           messages.push({
             role: "user",
@@ -103,10 +104,14 @@ export class DeepSeekSupportProvider {
           action: "answer",
           answer: answerIssues.length ? GUARDED_FALLBACK : answer,
           grounded: matches.length > 0 || usedTrustedTool,
-          citations: [...new Map(matches.map((match) => [
+          citations: [...new Map([
+            ...matches.map((match) => [
             match.filename,
             { filename: match.filename, title: match.title, source: match.source, sourcePages: match.sourcePages }
-          ])).values()]
+            ]),
+            ...(usedTrustedTool ? [["trusted-tool:get_order_status", { filename: "trusted-tool:get_order_status", title: "订单系统" }]] : [])
+          ]).values()],
+          reviewEvidence: matches.map((match) => ({ filename: match.filename, title: match.title, source: match.source, sourcePages: match.sourcePages, text: cleanExcerpt(match.text) }))
         };
       }
 
@@ -117,7 +122,7 @@ export class DeepSeekSupportProvider {
           result = call.function.name === "get_order_status"
             ? await getOrderStatus({ orderId: args.order_id, ...identity })
             : { error: "不支持的工具。" };
-          if (call.function.name === "get_order_status") usedTrustedTool = true;
+          if (call.function.name === "get_order_status" && !result.error) usedTrustedTool = true;
         } catch {
           result = { error: "工具参数无效。" };
         }
@@ -125,5 +130,16 @@ export class DeepSeekSupportProvider {
       }
     }
     throw new Error("DeepSeek tool loop exceeded the limit");
+  }
+
+  async review({ reviewPrompt }) {
+    const completion = await this.client.chat.completions.create({
+      model: this.config.DEEPSEEK_MODEL,
+      messages: [{ role: "system", content: reviewPrompt }, { role: "user", content: "请执行独立审核并只返回规定的 JSON。" }],
+      max_tokens: 900,
+      temperature: 0,
+      response_format: { type: "json_object" }
+    });
+    return completion.choices?.[0]?.message?.content || "";
   }
 }

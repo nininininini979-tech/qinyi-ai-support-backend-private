@@ -9,7 +9,7 @@ export class SupportService {
     this.handoff = handoff;
   }
 
-  async chat({ identity, sessionId, message }) {
+  async chat({ identity, sessionId, message, options = {} }) {
     let session;
     if (sessionId) {
       session = await this.sessionStore.get(identity.tenantId, identity.userId, sessionId);
@@ -34,6 +34,9 @@ export class SupportService {
       };
     }
     if (!this.config.AI_SERVICE_ENABLED || policy.action === "handoff") {
+      if (policy.reason === "restricted_business" && /投诉|complaint/i.test(message) && typeof this.provider.recordGovernanceSignal === "function") {
+        void this.provider.recordGovernanceSignal({ sessionId, signal: "major_complaint" })?.catch(() => {});
+      }
       if (this.config.AUTH_MODE === "public") {
         session.manualRequired = true;
         sessionId = (await this.sessionStore.save(identity.tenantId, identity.userId, sessionId, session)) || sessionId;
@@ -59,7 +62,26 @@ export class SupportService {
       };
     }
 
-    const result = await this.provider.answer({ message, identity, session });
+    const result = await this.provider.answer({ message, identity, session, sessionId, options });
+    if (result.action === "handoff_required") {
+      const historyLimit = this.config.SESSION_BACKEND === "stateless" ? 4 : 8;
+      session.history = [...session.history, { user: message, assistant: result.answer }].slice(-historyLimit);
+      session.manualRequired = true;
+      if (this.config.AUTH_MODE === "public") {
+        sessionId = (await this.sessionStore.save(identity.tenantId, identity.userId, sessionId, session)) || sessionId;
+        return { sessionId, action: "manual_required", answer: result.answer, citations: [] };
+      }
+      const ticket = await this.handoff.create({
+        ...identity,
+        sessionId,
+        reason: "thought_layer_review_failed",
+        unresolvedQuestion: message,
+        handoffReport: result.handoffReport
+      });
+      session.handoffTicketId = ticket.id;
+      sessionId = (await this.sessionStore.save(identity.tenantId, identity.userId, sessionId, session)) || sessionId;
+      return { sessionId, action: "handoff", answer: result.answer, ticketId: ticket.id, citations: [] };
+    }
     session.unresolvedCount = result.grounded ? 0 : session.unresolvedCount + 1;
     const historyLimit = this.config.SESSION_BACKEND === "stateless" ? 4 : 8;
     session.history = [...session.history, { user: message, assistant: result.answer }].slice(-historyLimit);

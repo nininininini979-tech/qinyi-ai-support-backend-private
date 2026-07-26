@@ -13,7 +13,12 @@ export class MockSupportProvider {
       const result = await getOrderStatus({ orderId, ...identity });
       if (result.error) return { action: "answer", answer: result.error, grounded: true, citations: [] };
       const tracking = result.tracking_code ? `，${result.carrier}单号 ${result.tracking_code}` : "";
-      return { action: "answer", answer: `订单 ${result.order_id} 当前状态：${result.status}${tracking}。更新时间：${result.updated_at}。`, grounded: true, citations: [] };
+      return {
+        action: "answer",
+        answer: `订单 ${result.order_id} 当前状态：${result.status}${tracking}。更新时间：${result.updated_at}。`,
+        grounded: true,
+        citations: [{ filename: "trusted-tool:get_order_status", title: "订单系统" }]
+      };
     }
 
     const chunks = await loadKnowledge(this.knowledgeDir);
@@ -30,9 +35,13 @@ export class MockSupportProvider {
     }
     return {
       action: "answer",
-      answer: `${match.title}\n\n${cleanExcerpt(match.text)}`,
+      answer: Array.from(`${match.title}\n\n${cleanExcerpt(match.text)}`).slice(0, 550).join(""),
       grounded: true,
       citations: [{ filename: match.filename, title: match.title }]
     };
+  }
+
+  async review() {
+    return { decision: "pass", score: 100, issues: [] };
   }
 }
