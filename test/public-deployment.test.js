@@ -14,6 +14,11 @@ test("Pages frontend uses relative assets and a configurable API base", async ()
   assert.match(app, /apiUrl\("\/api\/support\/chat"\)/);
   assert.match(app, /apiUrl\("\/api\/support\/status"\)/);
   assert.match(app, /X-Client-Id/);
+  assert.match(html, /id="professionalConsultationButton"/);
+  assert.match(app, /professionalConsultation/);
+  assert.match(app, /response-progress/);
+  assert.match(app, /aria-valuenow/);
+  assert.match(app, /data\.replyBudgets/);
   assert.match(runtimeConfig, /apiBaseUrl/);
   assert.doesNotMatch(runtimeConfig, /sk-[A-Za-z0-9_-]{12,}/);
 });

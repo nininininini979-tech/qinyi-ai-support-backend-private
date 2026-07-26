@@ -55,7 +55,9 @@ export class RedisSessionStore {
 }
 
 function decodePart(value) {
-  return Buffer.from(value, "base64url");
+  const decoded = Buffer.from(value, "base64url");
+  if (decoded.toString("base64url") !== value) throw new Error("Non-canonical session token encoding");
+  return decoded;
 }
 
 export class StatelessSessionStore {

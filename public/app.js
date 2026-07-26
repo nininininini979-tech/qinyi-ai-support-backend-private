@@ -1,7 +1,8 @@
 (function () {
   "use strict";
 
-  const REQUEST_TIMEOUT_MS = 45_000;
+  const NORMAL_REQUEST_TIMEOUT_MS = 45_000;
+  const PROFESSIONAL_REQUEST_TIMEOUT_MS = 125_000;
   const runtimeConfig = window.__QINYI_SUPPORT_CONFIG__ || {};
   const API_BASE_URL = typeof runtimeConfig.apiBaseUrl === "string"
     ? runtimeConfig.apiBaseUrl.trim().replace(/\/+$/, "")
@@ -60,6 +61,12 @@
     controller: null,
     lastFailedMessage: null,
     toastTimer: null,
+    professionalConsultation: storageRead(window.sessionStorage, "qinyi-professional-consultation") === "true",
+    progressTimer: null,
+    normalServerBudgetMs: 40_000,
+    professionalServerBudgetMs: 90_000,
+    normalRequestTimeoutMs: NORMAL_REQUEST_TIMEOUT_MS,
+    professionalRequestTimeoutMs: PROFESSIONAL_REQUEST_TIMEOUT_MS,
   };
 
   const elements = {
@@ -83,6 +90,7 @@
     retryButton: document.getElementById("retryButton"),
     dismissErrorButton: document.getElementById("dismissErrorButton"),
     toast: document.getElementById("toast"),
+    professionalConsultationButton: document.getElementById("professionalConsultationButton"),
   };
 
   function setText(element, value) {
@@ -281,7 +289,7 @@
     scrollToLatest();
   }
 
-  function showTyping() {
+  function showTyping(professional) {
     const article = document.createElement("article");
     article.id = "typingIndicator";
     article.className = "message message--assistant typing-indicator";
@@ -298,22 +306,47 @@
     setText(meta, "智能客服");
     const bubble = document.createElement("div");
     bubble.className = "message-bubble";
-    bubble.setAttribute("aria-label", "智能客服正在查询知识库");
+    bubble.setAttribute("aria-label", "智能客服正在生成答复");
+    const status = document.createElement("div");
+    status.className = "typing-status";
     const label = document.createElement("span");
-    setText(label, "正在查询知识库");
+    label.id = "typingProgressLabel";
+    setText(label, professional ? "正在整理专业问题" : "正在理解您的问题");
     const dots = document.createElement("span");
     dots.className = "typing-dots";
     dots.setAttribute("aria-hidden", "true");
     dots.append(document.createElement("span"), document.createElement("span"), document.createElement("span"));
-    bubble.append(label, dots);
+    status.append(label, dots);
+    const progress = document.createElement("div");
+    progress.className = "response-progress";
+    progress.setAttribute("role", "progressbar");
+    progress.setAttribute("aria-valuemin", "0");
+    progress.setAttribute("aria-valuemax", "100");
+    progress.setAttribute("aria-valuenow", "6");
+    const bar = document.createElement("div");
+    bar.className = "response-progress__bar";
+    progress.appendChild(bar);
+    bubble.append(status, progress);
     content.append(meta, bubble);
     article.append(avatar, content);
     elements.messages.appendChild(article);
     elements.messages.setAttribute("aria-busy", "true");
+    const startedAt = Date.now();
+    const budget = professional ? state.professionalServerBudgetMs : state.normalServerBudgetMs;
+    window.clearInterval(state.progressTimer);
+    state.progressTimer = window.setInterval(function () {
+      const ratio = Math.min(1, (Date.now() - startedAt) / budget);
+      const percent = Math.min(92, Math.round(6 + ratio * 86));
+      bar.style.width = `${percent}%`;
+      progress.setAttribute("aria-valuenow", String(percent));
+      setText(label, ratio < 0.28 ? (professional ? "正在整理专业问题" : "正在理解您的问题") : ratio < 0.7 ? "正在匹配资料" : "正在审核答复");
+    }, 500);
     scrollToLatest();
   }
 
   function hideTyping() {
+    window.clearInterval(state.progressTimer);
+    state.progressTimer = null;
     const indicator = document.getElementById("typingIndicator");
     if (indicator) {
       indicator.remove();
@@ -344,6 +377,7 @@
   function setPending(pending) {
     state.pending = pending;
     elements.newConversationButton.disabled = false;
+    elements.professionalConsultationButton.disabled = pending;
     updateSendButton();
   }
 
@@ -386,7 +420,8 @@
     elements.messageInput.value = "";
     resizeComposer();
     setPending(true);
-    showTyping();
+    const professional = state.professionalConsultation;
+    showTyping(professional);
 
     const controller = new AbortController();
     state.controller = controller;
@@ -394,10 +429,11 @@
     const timeout = window.setTimeout(function () {
       timedOut = true;
       controller.abort();
-    }, REQUEST_TIMEOUT_MS);
+    }, professional ? state.professionalRequestTimeoutMs : state.normalRequestTimeoutMs);
 
     try {
       const payload = { message: message };
+      payload.options = { professionalConsultation: professional };
       if (state.sessionId) {
         payload.sessionId = state.sessionId;
       }
@@ -538,6 +574,14 @@
         throw new Error("status unavailable");
       }
 
+      if (data.replyBudgets) {
+        const budgets = data.replyBudgets;
+        if (Number.isFinite(budgets.normalServerMs)) state.normalServerBudgetMs = budgets.normalServerMs;
+        if (Number.isFinite(budgets.professionalServerMs)) state.professionalServerBudgetMs = budgets.professionalServerMs;
+        if (Number.isFinite(budgets.normalClientMs)) state.normalRequestTimeoutMs = budgets.normalClientMs;
+        if (Number.isFinite(budgets.professionalClientMs)) state.professionalRequestTimeoutMs = budgets.professionalClientMs;
+      }
+
       if (data.aiEnabled === false) {
         setServiceStatus(
           "warning",
@@ -587,6 +631,17 @@
 
   elements.newConversationButton.addEventListener("click", resetConversation);
 
+  function updateProfessionalMode() {
+    elements.professionalConsultationButton.setAttribute("aria-pressed", String(state.professionalConsultation));
+  }
+
+  elements.professionalConsultationButton.addEventListener("click", function () {
+    state.professionalConsultation = !state.professionalConsultation;
+    storageWrite(window.sessionStorage, "qinyi-professional-consultation", String(state.professionalConsultation));
+    updateProfessionalMode();
+    showToast(state.professionalConsultation ? "已开启专业咨询" : "已切换为普通咨询");
+  });
+
   elements.retryButton.addEventListener("click", function () {
     if (state.lastFailedMessage) {
       sendMessage(state.lastFailedMessage, { appendUser: false });
@@ -602,6 +657,7 @@
   });
 
   resizeComposer();
+  updateProfessionalMode();
   updateSendButton();
   if (state.sessionId) setText(elements.sessionState, "进行中");
   loadServiceStatus();

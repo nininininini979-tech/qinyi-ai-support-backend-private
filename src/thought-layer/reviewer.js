@@ -31,7 +31,7 @@ function requirementPreserved(answer, requirement, outputLanguage) {
 
 export function reviewDeterministically({ candidate, contract, citations = [], grounded = citations.length > 0 }) {
   const answer = String(candidate || "");
-  const maxChars = contract.language.output === "en" ? 2400 : 600;
+  const maxChars = contract.b2.professionalConsultation ? 800 : 600;
   const issues = reviewProductAnswer(answer, maxChars).map((reason) => issue("unsupported_or_format_claim", "major", reason, "删除无依据断言或改为明确的待人工确认项。"));
 
   if (!grounded && !isEvidenceBoundedFallback(answer)) {
@@ -82,7 +82,7 @@ export function parseModelReview(value) {
 function normalizeModelReview(value) {
   const decision = ["pass", "fail", "escalate"].includes(value.decision) ? value.decision : "escalate";
   const score = Number.isFinite(Number(value.score)) ? Math.max(0, Math.min(100, Number(value.score))) : 0;
-  const issues = Array.isArray(value.issues) ? value.issues.slice(0, 20).map((item) => issue(
+  const issues = Array.isArray(value.issues) ? value.issues.slice(0, 4).map((item) => issue(
     String(item.code || "review_issue"),
     ["fatal", "major", "minor"].includes(item.severity) ? item.severity : "major",
     String(item.reason || "审核未提供原因。"),

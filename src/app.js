@@ -39,7 +39,8 @@ const chatOptionsSchema = z.object({
   channel: z.enum(["web", "sales", "email", "other"]).default("web"),
   budgetBand: z.enum(["unknown", "value", "standard", "premium"]).default("unknown"),
   urgency: z.enum(["normal", "urgent"]).default("normal"),
-  returningCustomer: z.boolean().default(false)
+  returningCustomer: z.boolean().default(false),
+  professionalConsultation: z.boolean().default(false)
 }).strict();
 const chatSchema = z.object({
   sessionId: sessionIdSchema.optional(),
@@ -154,7 +155,13 @@ export async function buildApp(config) {
     sessionBackend: config.SESSION_BACKEND,
     operatorMode: operatorControl.mode,
     agentCompany: true,
-    agents: operatorControl.status().agentCompany
+    agents: operatorControl.status().agentCompany,
+    replyBudgets: {
+      normalServerMs: config.THOUGHT_NORMAL_DEADLINE_MS,
+      professionalServerMs: config.THOUGHT_PROFESSIONAL_DEADLINE_MS,
+      normalClientMs: Math.min(45_000, config.THOUGHT_NORMAL_DEADLINE_MS + 1_000),
+      professionalClientMs: config.THOUGHT_PROFESSIONAL_DEADLINE_MS + 5_000
+    }
   }));
 
   app.post("/api/support/chat", async (request, reply) => {

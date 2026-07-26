@@ -29,21 +29,27 @@ export class AgentApiWindow {
     return Boolean(this.client);
   }
 
-  async invoke({ systemPrompt, userPrompt, json = false, legacyMethod, legacyInput }) {
+  async invoke({ systemPrompt, userPrompt, json = false, legacyMethod, legacyInput, timeoutMs, maxTokens = 1200 }) {
     if (this.profile.provider === "mock") return null;
     if (this.profile.provider === "inherit") {
       if (!this.legacyAdapter || typeof this.legacyAdapter[legacyMethod] !== "function") {
         throw new Error(`Agent ${this.profile.role.toUpperCase()} has no inherited ${legacyMethod} adapter`);
       }
-      return this.legacyAdapter[legacyMethod](legacyInput);
+      const controller = new AbortController();
+      const timer = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : null;
+      try {
+        return await this.legacyAdapter[legacyMethod]({ ...legacyInput, timeoutMs, maxTokens, signal: controller.signal });
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
     }
     const completion = await this.client.chat.completions.create({
       model: this.profile.model,
       messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }],
       temperature: 0,
-      max_tokens: 1200,
+      max_tokens: maxTokens,
       ...(json ? { response_format: { type: "json_object" } } : {})
-    });
+    }, timeoutMs ? { timeout: Math.max(1000, Math.min(30_000, timeoutMs)) } : undefined);
     return completion.choices?.[0]?.message?.content || "";
   }
 }

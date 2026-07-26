@@ -13,7 +13,7 @@ export class CompanyPolicyEngine {
   }
 
   requiresIndependentC({ contract, preflight, forceIndependent = false }) {
-    return forceIndependent || preflight.decision !== "pass" || riskAtLeast(contract.risk.level, "medium") || contract.risk.securityFlags.length > 0;
+    return forceIndependent || preflight.decision !== "pass" || riskAtLeast(contract.risk.level, "high") || contract.risk.securityFlags.length > 0;
   }
 
   validatePublishDecision({ decision, candidates }) {

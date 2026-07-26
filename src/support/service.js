@@ -91,16 +91,16 @@ export class SupportService {
     session.history = [...session.history, { user: message, assistant: result.answer }].slice(-historyLimit);
     session.lastResponseId = result.responseId;
 
-    if (session.unresolvedCount >= 2) {
+    if (session.unresolvedCount >= 3) {
       if (this.config.AUTH_MODE === "public") {
         session.manualRequired = true;
         sessionId = (await this.sessionStore.save(identity.tenantId, identity.userId, sessionId, session)) || sessionId;
-        return { sessionId, action: "manual_required", answer: "连续两次没有找到足够可靠的资料。公开站点不会创建真实工单，请通过公司的正式联系方式联系业务人员。", citations: [] };
+        return { sessionId, action: "manual_required", answer: "连续三次没有找到足够可靠的资料。公开站点不会创建真实工单，请通过公司的正式联系方式联系业务人员。", citations: [] };
       }
       const ticket = await this.handoff.create({ ...identity, sessionId, reason: "repeated_unresolved", unresolvedQuestion: message });
       session.handoffTicketId = ticket.id;
       sessionId = (await this.sessionStore.save(identity.tenantId, identity.userId, sessionId, session)) || sessionId;
-      return { sessionId, action: "handoff", answer: "连续两次未能从知识库中找到可靠答案，已为你转交人工客服。", ticketId: ticket.id, citations: [] };
+      return { sessionId, action: "handoff", answer: "连续三次未能从知识库中找到可靠答案，已为你转交人工客服。", ticketId: ticket.id, citations: [] };
     }
 
     sessionId = (await this.sessionStore.save(identity.tenantId, identity.userId, sessionId, session)) || sessionId;

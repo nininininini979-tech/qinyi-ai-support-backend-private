@@ -37,6 +37,8 @@ const schema = z.object({
   THOUGHT_MEMORY_SECRET: z.string().optional(),
   THOUGHT_STAGE_CONVERSATIONS: z.coerce.number().int().min(10).max(10000).default(100),
   THOUGHT_STAGE_DAYS: z.coerce.number().int().min(1).max(90).default(7),
+  THOUGHT_NORMAL_DEADLINE_MS: z.coerce.number().int().min(30000).max(44000).default(40000),
+  THOUGHT_PROFESSIONAL_DEADLINE_MS: z.coerce.number().int().min(45000).max(120000).default(90000),
   OPERATOR_MODE: z.enum(["observe", "draft", "auto", "paused"]).default("auto"),
   AGENT_A_PROVIDER: z.enum(["mock", "openai-compatible"]).default("mock"),
   AGENT_A_API_KEY: z.string().optional(),

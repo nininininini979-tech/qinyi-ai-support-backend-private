@@ -3,6 +3,7 @@ import { compileTaskContract } from "../thought-layer/contract.js";
 import { buildGenerationPrompt, buildReviewerPrompt, A_GOVERNANCE_PROMPT, D_STAGE_PROMPT } from "../thought-layer/prompts.js";
 import { combineReviews, parseModelReview } from "../thought-layer/reviewer.js";
 import { AGENT_IDS, agentRunMetadata } from "./protocol.js";
+import { toPlainText } from "../support/plain-text.js";
 
 function parseJson(value) {
   const text = String(value || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
@@ -51,17 +52,27 @@ export class AAgent {
   }
 
   async decide(input) {
-    let decision = this.fallbackDecision(input);
-    if (this.window.isRemote) {
-      const result = await this.window.invoke({
-        systemPrompt: A_GOVERNANCE_PROMPT,
-        userPrompt: `只返回 JSON 裁决。可选 action 为 publish、rework、handoff；publish 必须给 selectedCandidateId。\n${JSON.stringify(input)}`,
-        json: true
-      });
-      const proposed = parseJson(result);
-      if (proposed && ["publish", "rework", "handoff"].includes(proposed.action)) {
-        decision = { action: proposed.action, selectedCandidateId: proposed.selectedCandidateId, reasonCodes: Array.isArray(proposed.reasonCodes) ? proposed.reasonCodes.slice(0, 8).map(String) : ["a_remote_decision"] };
+    const requiredStageDecision = this.fallbackDecision(input);
+    let decision = requiredStageDecision;
+    if (this.window.isRemote && Number(input.timeoutMs || 0) >= 1000) {
+      try {
+        const result = await this.window.invoke({
+          systemPrompt: A_GOVERNANCE_PROMPT,
+          userPrompt: `只返回 JSON 裁决。可选 action 为 publish、rework、handoff；publish 必须给 selectedCandidateId。\n${JSON.stringify(input)}`,
+          json: true,
+          timeoutMs: input.timeoutMs,
+          maxTokens: 350
+        });
+        const proposed = parseJson(result);
+        if (proposed && ["publish", "rework", "handoff"].includes(proposed.action)) {
+          decision = { action: proposed.action, selectedCandidateId: proposed.selectedCandidateId, reasonCodes: Array.isArray(proposed.reasonCodes) ? proposed.reasonCodes.slice(0, 8).map(String) : ["a_remote_decision"] };
+        }
+      } catch {
+        decision = { ...this.fallbackDecision(input), reasonCodes: ["a_api_unavailable", ...this.fallbackDecision(input).reasonCodes] };
       }
+    }
+    if (decision.action !== requiredStageDecision.action) {
+      decision = { ...requiredStageDecision, reasonCodes: ["company_stop_condition_enforced", ...requiredStageDecision.reasonCodes] };
     }
     try {
       decision = this.policyEngine.validatePublishDecision({ decision, candidates: input.candidates });
@@ -100,11 +111,14 @@ export class BAgent {
       branch: order.branch,
       priorCandidate: order.priorCandidate,
       issues: order.issues,
-      evidenceBundle
+      evidenceBundle,
+      compact: order.compact
     });
     const output = await this.window.invoke({
       systemPrompt: generationPrompt,
       userPrompt: order.message,
+      timeoutMs: order.timeoutMs,
+      maxTokens: order.contract.b2.professionalConsultation ? 700 : 500,
       legacyMethod: "answer",
       legacyInput: {
         message: order.message,
@@ -114,7 +128,7 @@ export class BAgent {
       }
     });
     const result = typeof output === "string"
-      ? { action: "answer", answer: output, grounded: Boolean(evidenceBundle?.citations.length), citations: evidenceBundle?.citations || [], reviewEvidence: evidenceBundle?.evidence || [] }
+      ? { action: "answer", answer: toPlainText(output), grounded: Boolean(evidenceBundle?.citations.length), citations: evidenceBundle?.citations || [], reviewEvidence: evidenceBundle?.evidence || [] }
       : output || { action: "answer", answer: "当前生成 Agent 尚未连接。", grounded: false, citations: [] };
     return { id: candidateId(), branch: order.branch, result, producedBy: this.id, run: agentRunMetadata({ agentId: this.id, profile: this.profile }) };
   }
@@ -130,7 +144,7 @@ export class CAgent {
 
   async handle(envelope) {
     if (envelope.from !== AGENT_IDS.A || envelope.type !== "review_request") throw new Error("C only accepts A review requests");
-    const { contract, candidate, preflight } = envelope.payload;
+    const { contract, candidate, preflight, timeoutMs } = envelope.payload;
     const result = candidate.result;
     const citations = result.citations || [];
     const hydrated = result.reviewEvidence?.length || !this.evidenceResolver
@@ -141,6 +155,8 @@ export class CAgent {
       systemPrompt: reviewPrompt,
       userPrompt: "请执行独立审核并只返回规定的 JSON。",
       json: true,
+      timeoutMs,
+      maxTokens: 900,
       legacyMethod: "review",
       legacyInput: { contract, candidate: result.answer, reviewPrompt }
     });

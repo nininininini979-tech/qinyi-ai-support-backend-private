@@ -51,7 +51,7 @@ export class OpenAISupportProvider {
     ];
   }
 
-  async answer({ message, identity, session, thoughtContext }) {
+  async answer({ message, identity, session, thoughtContext, timeoutMs, maxTokens = 900, signal }) {
     const playbookPrompt = thoughtContext?.generationPrompt ? "" : await loadAutonomyPrompt(this.playbookDir, buildRetrievalQuery(message, session.history || []));
     const instructions = thoughtContext?.generationPrompt || `${SUPPORT_INSTRUCTIONS}\n${playbookPrompt}`;
     const safetyId = safetyIdentifier(this.config.USER_HASH_SECRET, identity.tenantId, identity.userId);
@@ -71,13 +71,13 @@ export class OpenAISupportProvider {
         input,
         previous_response_id: previousResponseId || undefined,
         tools: this.tools,
-        max_output_tokens: 900,
+        max_output_tokens: maxTokens,
         reasoning: { effort: this.config.OPENAI_REASONING_EFFORT },
         text: { verbosity: "low" },
         safety_identifier: safetyId,
         moderation: { model: "omni-moderation-latest" },
         store: this.config.OPENAI_STORE
-      });
+      }, { timeout: timeoutMs, maxRetries: 0, signal });
 
       if (moderationFlagged(response)) {
         return { action: "refuse", answer: "这项内容无法由在线助手处理。如有现实安全风险，请立即联系当地紧急服务或人工客服。", grounded: true, citations: [], responseId: response.id };
@@ -120,17 +120,17 @@ export class OpenAISupportProvider {
     };
   }
 
-  async review({ reviewPrompt }) {
+  async review({ reviewPrompt, timeoutMs, maxTokens = 900, signal }) {
     const response = await this.client.responses.create({
       model: this.config.OPENAI_MODEL,
       instructions: reviewPrompt,
       input: "请执行独立审核并只返回规定的 JSON。",
       tools: this.tools.filter((tool) => tool.type === "file_search"),
-      max_output_tokens: 900,
+      max_output_tokens: maxTokens,
       reasoning: { effort: this.config.OPENAI_REASONING_EFFORT },
       text: { verbosity: "low" },
       store: false
-    });
+    }, { timeout: timeoutMs, maxRetries: 0, signal });
     return response.output_text || "";
   }
 }

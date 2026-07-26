@@ -48,6 +48,15 @@ test("high-risk consultation invokes independent C", async () => {
   assert.equal(reviews, 1);
 });
 
+test("medium-risk professional consultation stays with B when company preflight passes", async () => {
+  const provider = {
+    answer: async () => ({ action: "answer", answer: "可先确认使用场景、片数、成品尺寸、材质与包装方向，再由业务人员核算价格、交期和特殊工艺可行性。", grounded: true, citations: [{ filename: "catalog.md" }] }),
+    review: async () => { throw new Error("C should not run for a passing medium-risk answer"); }
+  };
+  const result = await engineWith(provider).answer({ ...context, session: { history: [] }, message: "请介绍定制拼图的需求确认方式", options: { professionalConsultation: true } });
+  assert.equal(result.action, "answer");
+});
+
 test("prompt injection attempts invoke independent C", async () => {
   let reviews = 0;
   const provider = {
@@ -92,4 +101,79 @@ test("three failed review rounds produce a structured human handoff report", asy
   assert.equal(result.handoffReport.failureRounds, 3);
   assert.equal(generated, 7);
   assert.ok(result.handoffReport.lastIssues.length > 0);
+});
+
+test("normal consultation returns a compact safe answer when its total deadline is exhausted", async () => {
+  const provider = {
+    answer: async () => new Promise((resolve) => setTimeout(() => resolve({ action: "answer", answer: "迟到的答复", grounded: true, citations: [{ filename: "catalog.md" }] }), 80)),
+    review: async () => ({ decision: "pass", score: 100, issues: [] })
+  };
+  const engine = new ThoughtLayerEngine({
+    config: { THOUGHT_REVIEW_MAX_FAILURES: 3, THOUGHT_NORMAL_DEADLINE_MS: 30 },
+    provider,
+    playbookDir: path.resolve("service-playbook"),
+    memory: new NullThoughtMemory()
+  });
+  const result = await engine.answer({ ...context, session: { history: [] }, message: "介绍产品" });
+  assert.equal(result.timedOut, true);
+  assert.ok(Array.from(result.answer).length < 200);
+});
+
+test("deadline fallback follows the compiled output language", async () => {
+  const provider = {
+    answer: async () => new Promise(() => {}),
+    review: async () => ({ decision: "pass", score: 100, issues: [] })
+  };
+  const engine = new ThoughtLayerEngine({
+    config: { THOUGHT_REVIEW_MAX_FAILURES: 3, THOUGHT_NORMAL_DEADLINE_MS: 30 },
+    provider,
+    playbookDir: path.resolve("service-playbook"),
+    memory: new NullThoughtMemory()
+  });
+  const result = await engine.answer({ ...context, session: { history: [] }, message: "Please introduce the product", options: { outputLanguage: "en" } });
+  assert.equal(result.timedOut, true);
+  assert.match(result.answer, /^To protect accuracy/);
+  assert.doesNotMatch(result.answer, /为保证/);
+});
+
+test("provider AbortError is converted into the safe deadline fallback", async () => {
+  const provider = {
+    answer: async () => { throw Object.assign(new Error("aborted"), { name: "AbortError" }); },
+    review: async () => ({ decision: "pass", score: 100, issues: [] })
+  };
+  const result = await engineWith(provider).answer({ ...context, session: { history: [] }, message: "介绍产品" });
+  assert.equal(result.action, "answer");
+  assert.equal(result.timedOut, true);
+  assert.match(result.answer, /未在时限内完成/);
+});
+
+test("accepted-response archiving cannot delay an already approved reply", async () => {
+  const archived = [];
+  const memory = {
+    async appendEvent(event) {
+      if (event.type === "accepted_response") {
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        archived.push(event.type);
+      }
+    },
+    async appendCrystal() {}
+  };
+  const provider = {
+    answer: async () => ({ action: "answer", answer: "可先根据用途确认产品方向。", grounded: true, citations: [{ filename: "catalog.md" }] }),
+    review: async () => ({ decision: "pass", score: 100, issues: [] })
+  };
+  const engine = new ThoughtLayerEngine({
+    config: { THOUGHT_REVIEW_MAX_FAILURES: 3, THOUGHT_NORMAL_DEADLINE_MS: 9000 },
+    provider,
+    playbookDir: path.resolve("service-playbook"),
+    memory
+  });
+  const session = { history: [] };
+  const startedAt = Date.now();
+  const result = await engine.answer({ ...context, session, message: "介绍产品" });
+  assert.equal(result.action, "answer");
+  assert.ok(Date.now() - startedAt < 60);
+  assert.ok(session.thought);
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.deepEqual(archived, ["accepted_response"]);
 });

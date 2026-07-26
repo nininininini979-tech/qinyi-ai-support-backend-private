@@ -29,6 +29,60 @@ function bestCandidate(candidates) {
 
 const nullEvidenceResolver = { async resolve() { return { citations: [], evidence: [] }; } };
 
+class DeadlineExceededError extends Error {
+  constructor() {
+    super("Agent company reply deadline exceeded");
+    this.name = "DeadlineExceededError";
+  }
+}
+
+function remainingMs(deadlineAt) {
+  return Math.max(0, deadlineAt - Date.now());
+}
+
+function assertActive(operation) {
+  if (operation?.cancelled || remainingMs(operation?.deadlineAt || 0) < 1) {
+    if (operation) operation.cancelled = true;
+    throw new DeadlineExceededError();
+  }
+}
+
+async function withinDeadline(promise, timeoutMs, operation) {
+  if (timeoutMs < 1) {
+    if (operation) operation.cancelled = true;
+    throw new DeadlineExceededError();
+  }
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new DeadlineExceededError()), timeoutMs); })
+    ]);
+  } catch (error) {
+    if (error?.name === "AbortError" || error?.name === "DeadlineExceededError" || /timed?\s*out|timeout|deadline/i.test(String(error?.message || ""))) {
+      if (operation) operation.cancelled = true;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function isDeadlineError(error) {
+  return error?.name === "AbortError" || error?.name === "DeadlineExceededError" || /timed?\s*out|timeout|deadline/i.test(String(error?.message || ""));
+}
+
+function timeoutAnswer(contract, professional) {
+  const zh = professional
+    ? "为保证专业结论可靠，本轮证据整理与审核未能在时限内完成。请补充最关键的规格或目标，我会缩小范围继续分析；精确价格、交期与可行性仍需业务确认。"
+    : "为保证准确性，本轮未在时限内完成全部核验。我先不提供未经审核的结论；请补充最关键的产品、数量或用途，也可以由业务人员继续确认。";
+  const en = professional
+    ? "To keep the professional analysis reliable, the evidence review did not finish within this response window. Please provide the most important specification or objective so I can narrow the scope. Exact pricing, lead time, and feasibility still require business confirmation."
+    : "To protect accuracy, the required checks did not finish within this response window. I will not provide an unreviewed conclusion. Please add the key product, quantity, or intended use, or ask a specialist to confirm it.";
+  if (contract.language.bilingual) return `${zh}\n\n${en}`;
+  return contract.language.output === "en" ? en : zh;
+}
+
 export class ThoughtLayerEngine {
   constructor({ config, provider, reviewProvider, playbookDir, memory, governor, agents, apiWindows, evidenceResolver, policyEngine = new CompanyPolicyEngine() }) {
     this.config = config;
@@ -53,8 +107,10 @@ export class ThoughtLayerEngine {
     for (const agent of Object.values(this.agents)) this.bus.register(agent);
   }
 
-  async dispatch({ sessionId, from, to, type, payload, correlationId }) {
-    const response = await this.bus.send({ from, to, type, payload, correlationId });
+  async dispatch({ sessionId, from, to, type, payload, correlationId, timeoutMs, operation }) {
+    assertActive(operation);
+    const response = await withinDeadline(this.bus.send({ from, to, type, payload, correlationId }), timeoutMs || 30_000, operation);
+    assertActive(operation);
     await this.memory.appendEvent({
       sessionId,
       type: "agent_communication",
@@ -65,40 +121,56 @@ export class ThoughtLayerEngine {
     return response;
   }
 
-  async generate({ message, identity, session, sessionId, contract, playbookPrompt, branch = "initial", priorCandidate, issues }) {
-    const workOrder = this.agents.a.createWorkOrder({ message, identity, session, contract, playbookPrompt, branch, priorCandidate, issues });
-    return this.dispatch({ sessionId, from: AGENT_IDS.A, to: AGENT_IDS.B, type: "work_order", payload: workOrder, correlationId: contract.id });
+  async generate({ message, identity, session, sessionId, contract, playbookPrompt, deadlineAt, operation, branch = "initial", priorCandidate, issues }) {
+    assertActive(operation);
+    const remaining = remainingMs(deadlineAt);
+    const reserve = contract.b2.professionalConsultation ? 10_000 : 7_000;
+    const timeoutMs = Math.min(contract.b2.professionalConsultation ? 30_000 : 22_000, remaining - reserve);
+    if (timeoutMs < 1000) throw new DeadlineExceededError();
+    const workOrder = this.agents.a.createWorkOrder({ message, identity, session, contract, playbookPrompt, branch, priorCandidate, issues, timeoutMs, compact: remaining < (contract.b2.professionalConsultation ? 25_000 : 15_000) });
+    return this.dispatch({ sessionId, from: AGENT_IDS.A, to: AGENT_IDS.B, type: "work_order", payload: workOrder, correlationId: contract.id, timeoutMs: timeoutMs + 500, operation });
   }
 
-  async review({ sessionId, contract, candidate, forceIndependent = false }) {
+  async review({ sessionId, contract, candidate, deadlineAt, operation, forceIndependent = false }) {
+    assertActive(operation);
     const preflight = this.policyEngine.preflight({ contract, candidate });
     if (!this.policyEngine.requiresIndependentC({ contract, preflight, forceIndependent })) {
       return { ...candidate, review: preflight, reviewedBy: "company-policy" };
     }
+    const timeoutMs = Math.min(contract.b2.professionalConsultation ? 25_000 : 15_000, remainingMs(deadlineAt) - 5_000);
+    if (timeoutMs < 1000) throw new DeadlineExceededError();
     const reviewed = await this.dispatch({
       sessionId,
       from: AGENT_IDS.A,
       to: AGENT_IDS.C,
       type: "review_request",
-      payload: { contract, candidate: { id: candidate.id, result: candidate.result }, preflight },
-      correlationId: contract.id
+      payload: { contract, candidate: { id: candidate.id, result: candidate.result }, preflight, timeoutMs },
+      correlationId: contract.id,
+      timeoutMs: timeoutMs + 500,
+      operation
     });
     return { ...candidate, review: reviewed.review, reviewRun: reviewed.run };
   }
 
-  async decide({ sessionId, contract, candidates, failures }) {
-    const decision = await this.agents.a.decide({ contract: { id: contract.id, hash: contract.hash, risk: contract.risk }, candidates, failures, maxFailures: this.maxFailures });
+  async decide({ sessionId, contract, candidates, failures, deadlineAt, operation }) {
+    assertActive(operation);
+    const timeoutMs = Math.min(8_000, Math.max(0, remainingMs(deadlineAt) - 1000));
+    const decision = await this.agents.a.decide({ contract: { id: contract.id, hash: contract.hash, risk: contract.risk }, candidates, failures, maxFailures: this.maxFailures, timeoutMs });
+    assertActive(operation);
     await this.memory.appendEvent({ sessionId, type: "a_decision", agentId: AGENT_IDS.A, runId: decision.run?.runId, payload: { contractId: contract.id, decision, candidates: candidates.map((item) => ({ id: item.id, branch: item.branch, review: item.review })) } });
     return decision;
   }
 
-  async recordAccepted({ sessionId, contract, candidate, failures, decision }) {
+  async recordAccepted({ sessionId, contract, candidate, failures, decision, operation }) {
+    assertActive(operation);
     await this.memory.appendEvent({ sessionId, type: "accepted_response", payload: { contract, candidate: candidateView(candidate), review: candidate.review, decision, failures } });
+    assertActive(operation);
     await this.memory.appendCrystal({
       sessionId,
       type: "accepted_case",
       payload: { contractId: contract.id, contractHash: contract.hash, language: contract.language, risk: contract.risk, requirements: contract.demand.requirements, citations: candidate.result.citations || [], failures }
     });
+    assertActive(operation);
     void this.governor?.recordOutcome({
       outcome: failures ? "accepted_after_rework" : "accepted_first_pass",
       riskLevel: contract.risk.level,
@@ -117,25 +189,51 @@ export class ThoughtLayerEngine {
     }).catch(() => {});
   }
 
-  async answer({ message, identity, session = {}, sessionId, options = {} }) {
+  async answer(input) {
+    const professional = Boolean(input.options?.professionalConsultation);
+    const budgetMs = professional
+      ? Number(this.config.THOUGHT_PROFESSIONAL_DEADLINE_MS || 90_000)
+      : Number(this.config.THOUGHT_NORMAL_DEADLINE_MS || 40_000);
+    const operation = { deadlineAt: Date.now() + budgetMs, cancelled: false };
+    try {
+      return await withinDeadline(this.answerWithinDeadline({ ...input, deadlineAt: operation.deadlineAt, operation }), budgetMs, operation);
+    } catch (error) {
+      if (!isDeadlineError(error)) throw error;
+      operation.cancelled = true;
+      const contract = this.agents.a.compileContract({ message: input.message, session: input.session || {}, options: input.options || {} });
+      void this.memory.appendEvent({ sessionId: input.sessionId, type: "reply_timeout", agentId: AGENT_IDS.A, payload: { contractId: contract.id, professional, budgetMs } }).catch(() => {});
+      return {
+        action: "answer",
+        answer: timeoutAnswer(contract, professional),
+        grounded: false,
+        citations: [],
+        timedOut: true
+      };
+    }
+  }
+
+  async answerWithinDeadline({ message, identity, session = {}, sessionId, options = {}, deadlineAt, operation }) {
+    assertActive(operation);
     const contract = this.agents.a.compileContract({ message, session, options });
     const playbookPrompt = await loadAutonomyPrompt(this.playbookDir, message);
+    assertActive(operation);
     await this.memory.appendEvent({ sessionId, type: "customer_input", payload: { message, identity: { tenantId: identity.tenantId }, contract, options } });
+    assertActive(operation);
 
-    let initial = await this.generate({ message, identity, session, sessionId, contract, playbookPrompt });
+    let initial = await this.generate({ message, identity, session, sessionId, contract, playbookPrompt, deadlineAt, operation });
     if (initial.result.action && initial.result.action !== "answer") {
       await this.memory.appendEvent({ sessionId, type: "provider_controlled_response", payload: { contractId: contract.id, action: initial.result.action, producedBy: initial.producedBy } });
       return initial.result;
     }
-    initial = await this.review({ sessionId, contract, candidate: initial });
+    initial = await this.review({ sessionId, contract, candidate: initial, deadlineAt, operation });
     let failures = initial.review.decision === "pass" ? 0 : 1;
     let candidates = [initial];
-    let decision = await this.decide({ sessionId, contract, candidates, failures });
+    let decision = await this.decide({ sessionId, contract, candidates, failures, deadlineAt, operation });
 
     if (decision.action === "publish") {
       const selected = candidates.find((item) => item.id === decision.selectedCandidateId);
       session.thought = sessionThoughtState(contract, failures);
-      await this.recordAccepted({ sessionId, contract, candidate: selected, failures, decision });
+      void this.recordAccepted({ sessionId, contract, candidate: selected, failures, decision, operation }).catch(() => {});
       return this.policyEngine.publicProduct(selected);
     }
 
@@ -145,19 +243,20 @@ export class ThoughtLayerEngine {
 
     while (decision.action === "rework" && failures < this.maxFailures) {
       const generated = await Promise.all([
-        this.generate({ message, identity, session, sessionId, contract, playbookPrompt, branch: "fresh_1" }),
-        this.generate({ message, identity, session, sessionId, contract, playbookPrompt, branch: "fresh_2" }),
-        this.generate({ message, identity, session, sessionId, contract, playbookPrompt, branch: "repair", priorCandidate, issues })
+        this.generate({ message, identity, session, sessionId, contract, playbookPrompt, deadlineAt, operation, branch: "fresh_1" }),
+        this.generate({ message, identity, session, sessionId, contract, playbookPrompt, deadlineAt, operation, branch: "fresh_2" }),
+        this.generate({ message, identity, session, sessionId, contract, playbookPrompt, deadlineAt, operation, branch: "repair", priorCandidate, issues })
       ]);
-      candidates = await Promise.all(generated.map((candidate) => this.review({ sessionId, contract, candidate, forceIndependent: true })));
+      candidates = await Promise.all(generated.map((candidate) => this.review({ sessionId, contract, candidate, deadlineAt, operation, forceIndependent: true })));
       const hasPassing = candidates.some((item) => item.review.decision === "pass");
       if (!hasPassing) failures += 1;
-      decision = await this.decide({ sessionId, contract, candidates, failures });
+      decision = await this.decide({ sessionId, contract, candidates, failures, deadlineAt, operation });
       if (decision.action === "publish") {
         const selected = candidates.find((item) => item.id === decision.selectedCandidateId);
-        session.thought = sessionThoughtState(contract, failures);
         await this.memory.appendEvent({ sessionId, type: "candidate_comparison", payload: { contractId: contract.id, candidates: candidates.map((item) => ({ ...candidateView(item), review: item.review })), decision } });
-        await this.recordAccepted({ sessionId, contract, candidate: selected, failures, decision });
+        assertActive(operation);
+        session.thought = sessionThoughtState(contract, failures);
+        void this.recordAccepted({ sessionId, contract, candidate: selected, failures, decision, operation }).catch(() => {});
         return this.policyEngine.publicProduct(selected);
       }
       const best = bestCandidate(candidates);
@@ -167,7 +266,6 @@ export class ThoughtLayerEngine {
     }
 
     const latest = bestCandidate(candidates);
-    session.thought = sessionThoughtState(contract, failures);
     const handoffReport = {
       contractId: contract.id,
       contractHash: contract.hash,
@@ -183,8 +281,11 @@ export class ThoughtLayerEngine {
       aDecision: decision,
       recommendedNextQuestions: contract.demand.unknowns.slice(0, 3)
     };
+    assertActive(operation);
     await this.memory.appendEvent({ sessionId, type: "automatic_handoff", payload: handoffReport });
+    assertActive(operation);
     await this.memory.appendCrystal({ sessionId, type: "handoff_summary", payload: handoffReport });
+    assertActive(operation);
     void this.governor?.recordOutcome({
       outcome: "automatic_handoff",
       riskLevel: contract.risk.level,
@@ -201,6 +302,7 @@ export class ThoughtLayerEngine {
         decisionReasons: decision.reasonCodes || []
       }
     }).catch(() => {});
+    session.thought = sessionThoughtState(contract, failures);
     return {
       action: "handoff_required",
       answer: contract.language.output === "en"

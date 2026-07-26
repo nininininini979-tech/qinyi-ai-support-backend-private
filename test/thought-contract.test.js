@@ -38,3 +38,8 @@ test("language requested in the message overrides automatic input-language routi
   assert.equal(contract.language.output, "en");
   assert.equal(contract.risk.level, "high");
 });
+
+test("professional consultation is compiled into B2", () => {
+  const contract = compileTaskContract({ message: "请详细分析这个产品方案", options: { professionalConsultation: true } });
+  assert.equal(contract.b2.professionalConsultation, true);
+});

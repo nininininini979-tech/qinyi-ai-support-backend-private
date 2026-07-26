@@ -42,7 +42,7 @@ export class DeepSeekSupportProvider {
     this.client = new OpenAI({ apiKey: config.DEEPSEEK_API_KEY, baseURL: config.DEEPSEEK_BASE_URL, timeout: config.REQUEST_TIMEOUT_MS, maxRetries: 1 });
   }
 
-  async answer({ message, identity, session, thoughtContext }) {
+  async answer({ message, identity, session, thoughtContext, timeoutMs, maxTokens = 900, signal }) {
     const chunks = await loadKnowledge(this.knowledgeDir);
     const retrievalQuery = buildRetrievalQuery(message, session.history || []);
     const retrieved = retrieveKnowledge(chunks, retrievalQuery, 5);
@@ -72,12 +72,12 @@ export class DeepSeekSupportProvider {
       const completionRequest = {
         model: this.config.DEEPSEEK_MODEL,
         messages,
-        max_tokens: 900,
+        max_tokens: maxTokens,
         temperature: 0.1,
         user: safetyId
       };
       if (this.config.AUTH_MODE !== "public") completionRequest.tools = [orderTool];
-      completion = await this.client.chat.completions.create(completionRequest);
+      completion = await this.client.chat.completions.create(completionRequest, { timeout: timeoutMs, maxRetries: 0, signal });
       const choice = completion.choices?.[0];
       const assistant = choice?.message;
       if (!assistant) throw new Error("DeepSeek returned no message");
@@ -132,14 +132,14 @@ export class DeepSeekSupportProvider {
     throw new Error("DeepSeek tool loop exceeded the limit");
   }
 
-  async review({ reviewPrompt }) {
+  async review({ reviewPrompt, timeoutMs, maxTokens = 900, signal }) {
     const completion = await this.client.chat.completions.create({
       model: this.config.DEEPSEEK_MODEL,
       messages: [{ role: "system", content: reviewPrompt }, { role: "user", content: "请执行独立审核并只返回规定的 JSON。" }],
-      max_tokens: 900,
+      max_tokens: maxTokens,
       temperature: 0,
       response_format: { type: "json_object" }
-    });
+    }, { timeout: timeoutMs, maxRetries: 0, signal });
     return completion.choices?.[0]?.message?.content || "";
   }
 }

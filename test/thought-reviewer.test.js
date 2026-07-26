@@ -37,3 +37,11 @@ test("reviewer preserves confirmed quantities across spacing and English unit tr
   });
   assert.equal(review.issues.some((item) => item.code === "missing_confirmed_requirement"), false);
 });
+
+test("professional consultation allows up to 800 characters while normal mode stays at 600", () => {
+  const candidate = "说明".repeat(350);
+  const normal = compileTaskContract({ message: "介绍产品" });
+  const professional = compileTaskContract({ message: "介绍产品", options: { professionalConsultation: true } });
+  assert.ok(reviewDeterministically({ candidate, contract: normal, grounded: true, citations: [{ filename: "catalog.md" }] }).issues.some((item) => item.code === "unsupported_or_format_claim"));
+  assert.equal(reviewDeterministically({ candidate, contract: professional, grounded: true, citations: [{ filename: "catalog.md" }] }).issues.some((item) => item.code === "unsupported_or_format_claim"), false);
+});

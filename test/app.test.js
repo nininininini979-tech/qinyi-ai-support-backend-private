@@ -46,6 +46,12 @@ test("status reports the Agent company without exposing API keys", async (t) => 
   const body = (await app.inject({ method: "GET", url: "/api/support/status" })).json();
   assert.equal(body.provider, "agent-company");
   assert.deepEqual(Object.keys(body.agents), ["a", "b", "c", "d"]);
+  assert.deepEqual(body.replyBudgets, {
+    normalServerMs: 40000,
+    professionalServerMs: 90000,
+    normalClientMs: 41000,
+    professionalClientMs: 95000
+  });
   assert.doesNotMatch(JSON.stringify(body), /apiKey|API_KEY|sk-/);
 });
 
@@ -83,7 +89,7 @@ test("chat options are allowlisted and arbitrary prompt injection fields are rej
   const accepted = await app.inject({
     method: "POST",
     url: "/api/support/chat",
-    payload: { message: "介绍产品", options: { outputLanguage: "en", customerType: "organization" } }
+    payload: { message: "介绍产品", options: { outputLanguage: "en", customerType: "organization", professionalConsultation: true } }
   });
   assert.equal(accepted.statusCode, 200);
 
@@ -104,6 +110,18 @@ test("operator control exposes four departments and paused mode prevents automat
   const response = await app.inject({ method: "POST", url: "/api/support/chat", payload: { message: "介绍产品" } });
   assert.equal(response.json().action, "handoff");
   assert.match(response.json().answer, /人工审核和接管/);
+});
+
+test("unresolved answers hand off only after the third consecutive failure", async (t) => {
+  const app = await buildApp(testConfig());
+  t.after(() => app.close());
+  const first = await app.inject({ method: "POST", url: "/api/support/chat", payload: { message: "你们是否承接火星基地建设？" } });
+  const second = await app.inject({ method: "POST", url: "/api/support/chat", payload: { sessionId: first.json().sessionId, message: "请再查一次火星基地" } });
+  const third = await app.inject({ method: "POST", url: "/api/support/chat", payload: { sessionId: second.json().sessionId, message: "第三次确认火星基地" } });
+  assert.equal(first.json().action, "answer");
+  assert.equal(second.json().action, "answer");
+  assert.equal(third.json().action, "handoff");
+  assert.match(third.json().answer, /连续三次/);
 });
 
 test("public mode accepts an anonymous client and returns exact CORS headers", async (t) => {

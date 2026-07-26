@@ -20,6 +20,11 @@ test("product answer guard accepts conditional recommendations with human confir
   );
 });
 
+test("product answer guard accepts feasibility that is explicitly reserved for business verification", () => {
+  assert.deepEqual(reviewProductAnswer("特殊工艺可行性需由业务人员根据具体规格核算。"), []);
+  assert.ok(reviewProductAnswer("特殊工艺可以生产。").includes("未经确认的生产可行性"));
+});
+
 test("product answer guard enforces the response length budget", () => {
   assert.deepEqual(reviewProductAnswer("建议".repeat(301)), ["超过600字符"]);
 });

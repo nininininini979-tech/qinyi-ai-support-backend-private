@@ -47,7 +47,8 @@ export const taskContractSchema = z.object({
     channel: z.enum(["web", "sales", "email", "other"]),
     budgetBand: z.enum(["unknown", "value", "standard", "premium"]),
     urgency: z.enum(["normal", "urgent"]),
-    returningCustomer: z.boolean()
+    returningCustomer: z.boolean(),
+    professionalConsultation: z.boolean()
   }),
   c2: z.record(z.unknown()),
   acceptance: z.array(z.object({ id: z.string(), severity: z.enum(["fatal", "major", "minor"]), criterion: z.string() })),
@@ -162,7 +163,8 @@ export function compileTaskContract({ message, session = {}, options = {}, now =
       channel: options.channel || "web",
       budgetBand: options.budgetBand || "unknown",
       urgency: options.urgency || "normal",
-      returningCustomer: Boolean(options.returningCustomer)
+      returningCustomer: Boolean(options.returningCustomer),
+      professionalConsultation: Boolean(options.professionalConsultation)
     },
     c2: {},
     acceptance: [

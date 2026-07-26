@@ -12,7 +12,7 @@ const unsupportedClaims = [
     label: "未经确认的生产可行性",
     test: (value) => value.split(/[。！？；\n]/).some((sentence) => {
       const claim = /((?:数量|生产|模具|工艺).{0,12}(?:可行|没有问题|没问题|可以生产)|(?:达到|超过|满足).{0,40}(?:起订量|MOQ)|(?:起订量|MOQ).{0,30}(?:满足|达到|没有问题|没问题|可行)|数量上.{0,10}(?:没有问题|没问题|可行))/i.test(sentence);
-      const confirmation = /((?:需|需要|待|由).{0,10}(?:业务|人工|技术).{0,10}(?:确认|评估)|(?:业务|人工|技术).{0,10}(?:确认|评估))/i.test(sentence);
+      const confirmation = /((?:需|需要|待|由).{0,10}(?:业务|人工|技术).{0,16}(?:确认|评估|核算|复核|验证)|(?:业务|人工|技术).{0,16}(?:确认|评估|核算|复核|验证))/i.test(sentence);
       return claim && !confirmation;
     })
   },
