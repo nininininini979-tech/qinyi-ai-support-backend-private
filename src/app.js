@@ -146,15 +146,15 @@ export async function buildApp(config) {
   app.get("/app.js", (_, reply) => staticFile(reply, "app.js", "text/javascript; charset=utf-8"));
 
   app.get("/health/live", async () => ({ ok: true }));
-  app.get("/health/ready", async () => ({ ok: true, provider: config.SUPPORT_PROVIDER, sessionBackend: config.SESSION_BACKEND }));
+  app.get("/health/ready", async () => ({ ok: true, provider: "agent-company", sessionBackend: config.SESSION_BACKEND }));
   app.get("/api/support/status", async () => ({
-    provider: config.SUPPORT_PROVIDER,
+    provider: "agent-company",
     aiEnabled: config.AI_SERVICE_ENABLED,
     publicMode: config.AUTH_MODE === "public",
     sessionBackend: config.SESSION_BACKEND,
-    model: config.SUPPORT_PROVIDER === "openai" ? config.OPENAI_MODEL : config.SUPPORT_PROVIDER === "deepseek" ? config.DEEPSEEK_MODEL : undefined,
     operatorMode: operatorControl.mode,
-    agentCompany: true
+    agentCompany: true,
+    agents: operatorControl.status().agentCompany
   }));
 
   app.post("/api/support/chat", async (request, reply) => {

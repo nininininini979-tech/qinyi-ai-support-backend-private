@@ -40,6 +40,15 @@ test("chat API creates a session and answers from curated knowledge", async (t) 
   assert.ok(body.requestId);
 });
 
+test("status reports the Agent company without exposing API keys", async (t) => {
+  const app = await buildApp(testConfig());
+  t.after(() => app.close());
+  const body = (await app.inject({ method: "GET", url: "/api/support/status" })).json();
+  assert.equal(body.provider, "agent-company");
+  assert.deepEqual(Object.keys(body.agents), ["a", "b", "c", "d"]);
+  assert.doesNotMatch(JSON.stringify(body), /apiKey|API_KEY|sk-/);
+});
+
 test("restricted request creates one idempotent human ticket", async (t) => {
   const app = await buildApp(testConfig());
   t.after(() => app.close());
