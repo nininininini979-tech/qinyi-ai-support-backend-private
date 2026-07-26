@@ -13,6 +13,16 @@ function candidateId() {
   return `candidate-${crypto.randomUUID()}`;
 }
 
+function normalizeDAnalysis(proposed, fallback) {
+  if (!proposed || typeof proposed !== "object") return fallback;
+  return {
+    summary: typeof proposed.summary === "string" && proposed.summary.trim() ? proposed.summary.trim() : fallback.summary,
+    dominantIssues: Array.isArray(proposed.dominantIssues) ? proposed.dominantIssues.slice(0, 10) : fallback.dominantIssues,
+    directions: Array.isArray(proposed.directions) && proposed.directions.length ? proposed.directions.slice(0, 10).map(String) : fallback.directions,
+    proposedChanges: Array.isArray(proposed.proposedChanges) ? proposed.proposedChanges.slice(0, 10) : fallback.proposedChanges
+  };
+}
+
 export class AAgent {
   constructor({ window, policyEngine }) {
     this.id = AGENT_IDS.A;
@@ -164,9 +174,13 @@ export class DAgent {
       proposedChanges: []
     };
     if (this.window.isRemote) {
-      const output = await this.window.invoke({ systemPrompt: D_STAGE_PROMPT, userPrompt: JSON.stringify(snapshot), json: true });
+      const output = await this.window.invoke({
+        systemPrompt: D_STAGE_PROMPT,
+        userPrompt: `分析下面的阶段快照。请只返回一个有效 JSON 对象，不要使用 Markdown，不要原样复述输入。固定结构为：{"summary":"阶段结论","dominantIssues":[{"code":"问题代码","count":1}],"directions":["改良方向"],"proposedChanges":[]}。\n阶段快照：${JSON.stringify(snapshot)}`,
+        json: true
+      });
       const proposed = parseJson(output);
-      if (proposed) analysis = proposed;
+      analysis = normalizeDAnalysis(proposed, analysis);
     }
     return { ...analysis, proposedBy: this.id, run: agentRunMetadata({ agentId: this.id, profile: this.profile }) };
   }

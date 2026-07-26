@@ -25,6 +25,6 @@ export class LocalEvidenceResolver {
         });
       }
     }
-    return { citations, evidence };
+    return { citations: [...new Map(citations.map((item) => [item.filename, item])).values()], evidence };
   }
 }

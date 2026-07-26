@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { loadConfig } from "../src/config.js";
 import { agentApiProfile, createAgentApiWindows } from "../src/agent-company/api-windows.js";
-import { AAgent } from "../src/agent-company/agents.js";
+import { AAgent, DAgent } from "../src/agent-company/agents.js";
 import { CompanyPolicyEngine } from "../src/agent-company/company-policy.js";
 import { AGENT_IDS, createEnvelope } from "../src/agent-company/protocol.js";
 import { buildGenerationPrompt } from "../src/thought-layer/prompts.js";
@@ -72,4 +72,31 @@ test("ordinary low-risk work runs B without dispatching C", async () => {
   await engine.answer({ message: "介绍产品", identity: { tenantId: "t", userId: "u" }, sessionId: "s", session: { history: [] } });
   const routes = events.filter((item) => item.type === "agent_communication").map((item) => item.payload.to);
   assert.deepEqual(routes, [AGENT_IDS.B]);
+});
+
+test("D remote request explicitly asks for JSON", async () => {
+  let request;
+  const window = {
+    isRemote: true,
+    profile: { provider: "openai-compatible", model: "d-test", charterVersion: "d-v1" },
+    async invoke(input) {
+      request = input;
+      return '{"summary":"ok","directions":[],"proposedChanges":[]}';
+    }
+  };
+  await new DAgent({ window }).handle({ from: AGENT_IDS.A, type: "stage_snapshot", payload: { samples: [] } });
+  assert.match(request.userPrompt, /JSON/);
+  assert.equal(request.json, true);
+});
+
+test("D keeps its fixed proposal contract when a remote API echoes the snapshot", async () => {
+  const window = {
+    isRemote: true,
+    profile: { provider: "openai-compatible", model: "d-test", charterVersion: "d-v1" },
+    async invoke() { return '{"metrics":{},"samples":[]}'; }
+  };
+  const result = await new DAgent({ window }).handle({ from: AGENT_IDS.A, type: "stage_snapshot", payload: { samples: [{ outcome: "automatic_handoff", issueCodes: ["missing_evidence"] }] } });
+  assert.match(result.summary, /1 个脱敏样本/);
+  assert.ok(result.directions.length > 0);
+  assert.deepEqual(result.proposedChanges, []);
 });
