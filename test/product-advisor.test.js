@@ -40,7 +40,7 @@ test("an explicit puzzle piece count retrieves only its matching size section", 
 
 test("common vague discovery questions all receive approved catalog context", async () => {
   const chunks = await loadKnowledge(path.resolve("knowledge/prepared"));
-  const questions = ["介绍一下你们的产品", "给我推荐一款", "我不知道选什么", "适合景区的产品", "想做儿童礼物"];
+  const questions = ["介绍一下你们的产品", "你们有哪些产品？", "给我推荐一款", "我不知道选什么", "适合景区的产品", "想做儿童礼物"];
   for (const message of questions) {
     const context = enrichProductContext(chunks, retrieveKnowledge(chunks, message, 5), message, 5);
     assert.ok(context.some((chunk) => chunk.category === "product_catalog" && chunk.approvalStatus === "source_verified"), message);

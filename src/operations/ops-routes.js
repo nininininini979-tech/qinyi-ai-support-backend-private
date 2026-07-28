@@ -1,4 +1,6 @@
 import { bearerToken } from "./auth.js";
+import { evaluateRuntimeRules, parseRuntimeRulesUpdate } from "./runtime-rules.js";
+import { classifyMessage } from "../support/policy.js";
 
 function fail(message, statusCode = 400) {
   throw Object.assign(new Error(message), { statusCode });
@@ -28,6 +30,20 @@ function publicConversation(item, handoff) {
     updatedAt: item.updatedAt,
     unreadCount: ["waiting_human", "acknowledged"].includes(handoff?.status) ? 1 : 0,
     ticketId: handoff?.id
+  };
+}
+
+function publicAttachment(item) {
+  const downloadable = item.scope === "visitor" && item.status === "available";
+  return {
+    id: item.id,
+    filename: item.filename,
+    mimeType: item.mimeType,
+    size: item.size,
+    status: item.status || "registered",
+    createdAt: item.createdAt,
+    downloadable,
+    ...(downloadable ? { downloadUrl: `/api/admin/attachments/${encodeURIComponent(item.id)}/file` } : {})
   };
 }
 
@@ -100,9 +116,10 @@ export async function registerOpsCompatibilityRoutes(app, { config, service, aut
     user: { name: request.operationsSession.displayName, username: request.operationsSession.username, role: request.operationsSession.role, roleLabel: request.operationsSession.role }
   }));
 
-  app.get("/api/ops/overview", { preHandler: requireSupport }, async () => {
-    const [overview, handoffs, revisions, activity] = await Promise.all([
-      service.overview(), service.listHandoffs(), service.listContentRevisions(), service.store.listEvents({ limit: 12 })
+  app.get("/api/ops/overview", { preHandler: requireSupport }, async (request) => {
+    const [overview, handoffs, revisions, activity, notifications] = await Promise.all([
+      service.overview(), service.listHandoffs(), service.listContentRevisions(), service.store.listEvents({ limit: 12 }),
+      service.listNotifications({ status: "pending", recipientUsername: request.operationsSession.username, limit: 20 })
     ]);
     const queue = handoffs.filter((item) => !["resolved", "closed"].includes(item.status));
     return {
@@ -116,7 +133,14 @@ export async function registerOpsCompatibilityRoutes(app, { config, service, aut
         id: item.conversationId, customerName: "网站访客", reason: item.summary,
         status: item.status, priority: item.priority, updatedAt: item.updatedAt
       })),
-      alerts: overview.pendingNotifications ? [{ severity: "warning", title: "有待确认提醒", detail: `${overview.pendingNotifications} 项通知尚未处理` }] : [],
+      alerts: notifications.map((item) => ({
+        id: item.id,
+        severity: "warning",
+        title: item.type === "handoff_transfer_requested" ? "有待确认的会话转交" : "有待确认提醒",
+        detail: item.type === "handoff_transfer_requested" ? "另一名管理员已将客户会话转交给您，请进入人工接管页面确认、退回或再次转交。" : "请及时处理该提醒。",
+        conversationId: item.conversationId,
+        transferId: item.transferId
+      })),
       content: {
         draftCount: revisions.filter((item) => item.status === "draft").length,
         pendingCount: revisions.filter((item) => item.status === "review").length,
@@ -142,8 +166,13 @@ export async function registerOpsCompatibilityRoutes(app, { config, service, aut
     const claimed = Boolean(handoff?.assignee === currentActor && ["human_active", "waiting_customer"].includes(handoff.status));
     return {
       session: {
-        ...conversation,
+        id: conversation.id,
         status: handoff?.status || conversation.status,
+        mode: conversation.mode,
+        channel: conversation.channel,
+        createdAt: conversation.createdAt,
+        updatedAt: conversation.updatedAt,
+        lastAction: conversation.lastAction,
         statusLabel: handoffLabel(handoff?.status || conversation.status),
         assigneeName: handoff?.assignee,
         claimedByCurrentUser: claimed,
@@ -155,6 +184,21 @@ export async function registerOpsCompatibilityRoutes(app, { config, service, aut
         text: message.content, createdAt: message.createdAt,
         author: message.role === "human" ? "勤益人工客服" : undefined
       })),
+      aiDrafts: (conversation.aiDrafts || []).map((draft) => ({
+        id: draft.id,
+        mode: draft.mode,
+        status: draft.status,
+        content: draft.content,
+        finalContent: draft.finalContent,
+        grounded: draft.grounded,
+        citations: draft.citations,
+        createdAt: draft.createdAt,
+        updatedAt: draft.updatedAt,
+        reviewedAt: draft.reviewedAt,
+        reviewerName: draft.reviewerName,
+        rejectionReason: draft.rejectionReason
+      })),
+      attachments: (conversation.attachments || []).map(publicAttachment),
       customer: { name: "网站访客", intentSummary: handoff?.summary },
       handoff: handoff ? { ...handoff, ticketId: handoff.id } : null
     };
@@ -171,8 +215,11 @@ export async function registerOpsCompatibilityRoutes(app, { config, service, aut
     const conversation = await service.getConversation(String(request.params.conversationId));
     const handoff = conversation?.handoffs?.find((item) => !["resolved", "closed"].includes(item.status));
     if (!handoff) return reply.code(404).send({ error: "没有可接管的人工请求。", requestId: request.id });
-    const actor = actorFor(request);
-    return service.updateHandoff(handoff.id, { status: "human_active", assignee: actor }, actor);
+    return service.claimHandoff({
+      handoffId: handoff.id,
+      username: request.operationsSession.username,
+      displayName: request.operationsSession.displayName
+    });
   });
 
   app.post("/api/ops/sessions/:conversationId/resolve", { preHandler: requireSupport }, async (request, reply) => {
@@ -185,8 +232,44 @@ export async function registerOpsCompatibilityRoutes(app, { config, service, aut
   app.post("/api/ops/sessions/:conversationId/messages", { preHandler: requireSupport }, async (request, reply) => {
     const message = text(request.body?.message, 2000);
     if (!message) fail("回复内容不能为空。");
-    const result = await service.addHumanMessage({ conversationId: String(request.params.conversationId), content: message, actor: actorFor(request) });
+    const result = await service.addHumanMessage({
+      conversationId: String(request.params.conversationId),
+      content: message,
+      actor: actorFor(request),
+      actorUsername: request.operationsSession.username
+    });
     return result ? reply.code(201).send(result) : reply.code(404).send({ error: "会话不存在。", requestId: request.id });
+  });
+
+  app.get("/api/ops/ai-drafts", { preHandler: requireSupport }, async (request) => ({
+    items: await service.listAiDrafts({
+      status: request.query?.status ? String(request.query.status) : undefined,
+      conversationId: request.query?.conversationId ? String(request.query.conversationId) : undefined,
+      limit: Number(request.query?.limit) || 100
+    })
+  }));
+
+  app.post("/api/ops/ai-drafts/:draftId/approve", { preHandler: requireSupport }, async (request, reply) => {
+    const content = request.body?.content == null ? undefined : text(request.body.content, 4000);
+    const result = await service.approveAiDraft({
+      draftId: String(request.params.draftId),
+      content,
+      actorUsername: request.operationsSession.username,
+      actorDisplayName: request.operationsSession.displayName
+    });
+    return result || reply.code(404).send({ error: "AI 草稿不存在。", requestId: request.id });
+  });
+
+  app.post("/api/ops/ai-drafts/:draftId/reject", { preHandler: requireSupport }, async (request, reply) => {
+    const reason = text(request.body?.reason, 1000);
+    if (!reason) fail("驳回原因不能为空。");
+    const result = await service.rejectAiDraft({
+      draftId: String(request.params.draftId),
+      reason,
+      actorUsername: request.operationsSession.username,
+      actorDisplayName: request.operationsSession.displayName
+    });
+    return result || reply.code(404).send({ error: "AI 草稿不存在。", requestId: request.id });
   });
 
   app.get("/api/ops/important-information", { preHandler: requireAdministrator }, async () => {
@@ -229,19 +312,54 @@ export async function registerOpsCompatibilityRoutes(app, { config, service, aut
   });
 
   app.get("/api/ops/rules", { preHandler: requireAdministrator }, async () => {
-    const settings = await service.getSystemConfig();
-    return settings.rules || { mode: settings.operatorMode || "auto", handoff: ["price", "delivery", "complaint", "payment", "legal", "missing_knowledge"], note: "", revision: 1 };
+    return service.getRuntimeRules();
   });
   app.put("/api/ops/rules", { preHandler: requireAdministrator }, async (request) => {
-    const rules = request.body && typeof request.body === "object" ? request.body : {};
-    const saved = await service.updateSystemConfig({ rules, operatorMode: rules.mode || "auto" }, actorFor(request));
-    await applySystemConfig?.(saved);
-    return { ...rules, revision: Date.now() };
+    const update = parseRuntimeRulesUpdate(request.body);
+    const rules = await service.updateRuntimeRules(update, actorFor(request));
+    await applySystemConfig?.({ rules, operatorMode: rules.mode });
+    return rules;
   });
-  app.post("/api/ops/rules/test", { preHandler: requireAdministrator }, (request) => {
+  app.get("/api/ops/rules/revisions", { preHandler: requireAdministrator }, async (request) => ({
+    items: await service.listRuntimeRuleRevisions({ limit: Number(request.query?.limit) || 50 })
+  }));
+  app.post("/api/ops/rules/revisions/:revision/restore", { preHandler: requireAdministrator }, async (request, reply) => {
+    const revision = Number(request.params.revision);
+    if (!Number.isInteger(revision) || revision < 1) fail("客服规则版本无效。");
+    const rules = await service.restoreRuntimeRuleRevision(revision, actorFor(request));
+    if (!rules) return reply.code(404).send({ error: "客服规则版本不存在。", requestId: request.id });
+    await applySystemConfig?.({ rules, operatorMode: rules.mode });
+    return rules;
+  });
+  app.post("/api/ops/rules/test", { preHandler: requireAdministrator }, async (request) => {
     const message = text(request.body?.message, 2000);
-    const matched = /价格|报价|交期|投诉|付款|合同|人工|无法|不知道/.test(message);
-    return { matched, action: matched ? "handoff" : "ai", explanation: matched ? "命中人工优先规则。" : "可进入受控 AI 回答流程。" };
+    if (!message) fail("测试消息不能为空。");
+    const rules = await service.getRuntimeRules();
+    if (rules.mode !== "auto") {
+      return {
+        matched: true,
+        action: "handoff",
+        reason: `operator_mode_${rules.mode}`,
+        rule: { key: "service_mode", label: "当前服务模式" },
+        revision: rules.revision,
+        explanation: "当前服务模式要求人工审核或接管。"
+      };
+    }
+    const immutable = classifyMessage(message);
+    if (immutable.action === "handoff") {
+      return {
+        matched: true,
+        action: "handoff",
+        reason: immutable.reason,
+        rule: { key: "immutable_safety", label: "不可修改的安全边界" },
+        explanation: "命中不可修改的人工服务安全边界。"
+      };
+    }
+    const result = evaluateRuntimeRules(message, rules);
+    return {
+      ...result,
+      explanation: result.matched ? `命中“${result.rule.label}”规则。` : "未命中已启用的运营转人工规则，可进入受控 AI 回答流程。"
+    };
   });
 
   app.get("/api/ops/audit", { preHandler: requireAdministrator }, async (request) => {

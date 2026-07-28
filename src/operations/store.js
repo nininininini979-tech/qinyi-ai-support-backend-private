@@ -1,15 +1,23 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { PostgresOperationsStore } from "./postgres-store.js";
 
 const EMPTY_STATE = Object.freeze({
   version: 1,
   sequence: 0,
   conversations: {},
   messages: {},
+  aiDrafts: {},
   handoffs: {},
   contacts: {},
   notifications: {},
+  quotes: {},
+  orders: {},
+  customerAuthChallenges: {},
+  customerSessions: {},
+  orderSystemConfig: {},
   contentRevisions: {},
+  runtimeRuleRevisions: {},
   systemConfig: {},
   authSessions: {}
 });
@@ -115,6 +123,12 @@ export class FileOperationsStore {
 }
 
 export async function createOperationsStore(config, rootDir) {
+  if (config.OPERATIONS_STORE === "postgres") {
+    return new PostgresOperationsStore({
+      connectionString: config.DATABASE_URL,
+      sslMode: config.DATABASE_SSL_MODE
+    }).init();
+  }
   const directory = path.isAbsolute(config.OPERATIONS_DATA_DIR)
     ? config.OPERATIONS_DATA_DIR
     : path.join(rootDir, config.OPERATIONS_DATA_DIR);

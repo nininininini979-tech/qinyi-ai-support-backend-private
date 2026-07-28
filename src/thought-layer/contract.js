@@ -51,6 +51,12 @@ export const taskContractSchema = z.object({
     professionalConsultation: z.boolean()
   }),
   c2: z.record(z.unknown()),
+  runtimePolicy: z.object({
+    schemaVersion: z.number().int().positive(),
+    revision: z.number().int().positive(),
+    note: z.string().max(4000),
+    enabledHandoffKeys: z.array(z.string().max(80)).max(20)
+  }).optional(),
   acceptance: z.array(z.object({ id: z.string(), severity: z.enum(["fatal", "major", "minor"]), criterion: z.string() })),
   provenance: z.object({ policyVersion: z.string(), aVersion: z.string(), b1Version: z.string(), c1Version: z.string(), dVersion: z.string() })
 });
@@ -128,7 +134,7 @@ export function contractHash(value) {
   return crypto.createHash("sha256").update(JSON.stringify(canonical(value))).digest("hex");
 }
 
-export function compileTaskContract({ message, session = {}, options = {}, now = new Date() }) {
+export function compileTaskContract({ message, session = {}, options = {}, runtimePolicy, now = new Date() }) {
   const input = detectLanguage(message);
   const previous = session.thought || {};
   const turn = Number(previous.turn || 0) + 1;
@@ -167,6 +173,12 @@ export function compileTaskContract({ message, session = {}, options = {}, now =
       professionalConsultation: Boolean(options.professionalConsultation)
     },
     c2: {},
+    ...(runtimePolicy ? { runtimePolicy: {
+      schemaVersion: Number(runtimePolicy.schemaVersion || 1),
+      revision: Number(runtimePolicy.revision || 1),
+      note: String(runtimePolicy.note || "").trim().slice(0, 4000),
+      enabledHandoffKeys: Array.isArray(runtimePolicy.enabledHandoffKeys) ? runtimePolicy.enabledHandoffKeys.slice(0, 20).map((item) => String(item).slice(0, 80)) : []
+    } } : {}),
     acceptance: [
       { id: "semantic-fidelity", severity: "fatal", criterion: "Preserve confirmed requirements, quantities, units, conditions, and uncertainty." },
       { id: "evidence-boundary", severity: "fatal", criterion: "Do not add company facts or feasibility claims without trusted evidence." },

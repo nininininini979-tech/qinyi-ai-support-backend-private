@@ -4,13 +4,11 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { FileOperationsStore } from "../src/operations/store.js";
-import { OperationsAuthService, totpCode } from "../src/operations/auth.js";
+import { OperationsAuthService } from "../src/operations/auth.js";
 import { OperationsService } from "../src/operations/service.js";
 import { buildApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
 
-const TOTP_SECRET = "JBSWY3DPEHPK3PXP";
-const SECOND_TOTP_SECRET = "KRUGS4ZANFZSAYJA";
 const SESSION_SECRET = "0123456789abcdef0123456789abcdef";
 const ADMIN_PASSWORD = "correct horse battery staple";
 const DEVELOPER_TOKEN = "developer-token-0123456789abcdef";
@@ -39,12 +37,12 @@ test("file operations store persists atomic snapshots and append-only events", a
   await reopened.close();
 });
 
-test("operations auth requires both password and TOTP and stores only token hashes", async (t) => {
+test("operations auth requires a password and stores only token hashes", async (t) => {
   const directory = await temporaryDirectory(t);
   const store = await new FileOperationsStore({ directory }).init();
-  const auth = new OperationsAuthService({ store, password: ADMIN_PASSWORD, totpSecret: TOTP_SECRET, sessionSecret: SESSION_SECRET, ttlSeconds: 600 });
-  assert.equal(await auth.login({ password: "wrong-password", totp: totpCode(TOTP_SECRET) }), null);
-  const login = await auth.login({ password: ADMIN_PASSWORD, totp: totpCode(TOTP_SECRET), ip: "127.0.0.1" });
+  const auth = new OperationsAuthService({ store, password: ADMIN_PASSWORD, sessionSecret: SESSION_SECRET, ttlSeconds: 600 });
+  assert.equal(await auth.login({ password: "wrong-password" }), null);
+  const login = await auth.login({ password: ADMIN_PASSWORD, ip: "127.0.0.1" });
   assert.ok(login.token);
   assert.ok(await auth.authenticate(login.token));
   const snapshot = await fs.readFile(path.join(directory, "operations.json"), "utf8");
@@ -57,8 +55,8 @@ test("operations auth requires both password and TOTP and stores only token hash
 test("multi-user operations login preserves account identity and role", async (t) => {
   const directory = await temporaryDirectory(t);
   const accounts = [
-    { username: "support01", displayName: "客服一组", role: "support", password: "support-password-123", totpSecret: TOTP_SECRET },
-    { username: "developer01", displayName: "值班开发者", role: "developer", password: "developer-password-456", totpSecret: SECOND_TOTP_SECRET }
+    { username: "support01", displayName: "客服一组", role: "support", password: "support-password-123" },
+    { username: "developer01", displayName: "值班开发者", role: "developer", password: "developer-password-456" }
   ];
   const config = loadConfig({
     NODE_ENV: "production", SUPPORT_PROVIDER: "mock", AUTH_MODE: "public", SESSION_BACKEND: "stateless",
@@ -69,18 +67,25 @@ test("multi-user operations login preserves account identity and role", async (t
   const app = await buildApp(config);
   t.after(() => app.close());
 
-  const supportLogin = await app.inject({ method: "POST", url: "/api/admin/auth/login", payload: { username: "support01", password: accounts[0].password, totp: totpCode(TOTP_SECRET) } });
+  const obsoleteSecondFactor = await app.inject({
+    method: "POST",
+    url: "/api/admin/auth/login",
+    payload: { username: "support01", password: accounts[0].password, totp: "000000" }
+  });
+  assert.equal(obsoleteSecondFactor.statusCode, 400);
+  const supportLogin = await app.inject({ method: "POST", url: "/api/admin/auth/login", payload: { username: "support01", password: accounts[0].password } });
   assert.equal(supportLogin.statusCode, 200);
   assert.deepEqual(supportLogin.json().user, { username: "support01", name: "客服一组", role: "support" });
   const supportHeaders = { authorization: `Bearer ${supportLogin.json().token}` };
   assert.equal((await app.inject({ method: "GET", url: "/api/ops/me", headers: supportHeaders })).json().user.role, "support");
   assert.equal((await app.inject({ method: "GET", url: "/api/ops/developer/status", headers: supportHeaders })).statusCode, 403);
 
-  const developerLogin = await app.inject({ method: "POST", url: "/api/admin/auth/login", payload: { username: "developer01", password: accounts[1].password, totp: totpCode(SECOND_TOTP_SECRET) } });
+  const developerLogin = await app.inject({ method: "POST", url: "/api/admin/auth/login", payload: { username: "developer01", password: accounts[1].password } });
   assert.equal(developerLogin.statusCode, 200);
   assert.equal(developerLogin.json().user.role, "developer");
   const developerHeaders = { authorization: `Bearer ${developerLogin.json().token}` };
   assert.equal((await app.inject({ method: "GET", url: "/api/ops/developer/status", headers: developerHeaders })).statusCode, 200);
+  assert.equal((await app.inject({ method: "POST", url: "/api/admin/auth/totp/confirm", payload: {} })).statusCode, 404);
 });
 
 test("operations service models conversations, messages, handoffs, contacts, notifications, revisions and config", async (t) => {
@@ -106,7 +111,7 @@ test("operations APIs authenticate admins, accept developer events, and create p
   const config = loadConfig({
     NODE_ENV: "production", SUPPORT_PROVIDER: "mock", AUTH_MODE: "public", SESSION_BACKEND: "stateless", AI_SERVICE_ENABLED: "true",
     USER_HASH_SECRET: SESSION_SECRET, RATE_LIMIT_MAX: "1000", OPERATIONS_ENABLED: "true", OPERATIONS_DATA_DIR: directory,
-    OPERATIONS_ADMIN_PASSWORD: ADMIN_PASSWORD, OPERATIONS_ADMIN_TOTP_SECRET: TOTP_SECRET, OPERATIONS_SESSION_SECRET: SESSION_SECRET,
+    OPERATIONS_ADMIN_PASSWORD: ADMIN_PASSWORD, OPERATIONS_SESSION_SECRET: SESSION_SECRET,
     OPERATIONS_DEVELOPER_TOKEN: DEVELOPER_TOKEN
   });
   const app = await buildApp(config);
@@ -126,7 +131,7 @@ test("operations APIs authenticate admins, accept developer events, and create p
 
   const denied = await app.inject({ method: "GET", url: "/api/admin/overview" });
   assert.equal(denied.statusCode, 401);
-  const login = await app.inject({ method: "POST", url: "/api/admin/auth/login", payload: { username: "admin", password: ADMIN_PASSWORD, totp: totpCode(TOTP_SECRET) } });
+  const login = await app.inject({ method: "POST", url: "/api/admin/auth/login", payload: { username: "admin", password: ADMIN_PASSWORD } });
   assert.equal(login.statusCode, 200);
   const adminHeaders = { authorization: `Bearer ${login.json().token}` };
   const overview = await app.inject({ method: "GET", url: "/api/admin/overview", headers: adminHeaders });
@@ -141,7 +146,7 @@ test("operations APIs authenticate admins, accept developer events, and create p
   assert.equal((await app.inject({ method: "POST", url: `/api/admin/conversations/${conversationId}/messages`, headers: adminHeaders, payload: { message: "您好，我已接管本次对话。" } })).statusCode, 201);
   const visitorFollowUp = await app.inject({ method: "POST", url: "/api/support/chat", headers: clientHeaders, payload: { sessionId, message: "谢谢，我补充数量为500套。" } });
   assert.equal(visitorFollowUp.json().handoff.status, "human_active");
-  assert.equal(visitorFollowUp.json().answer, "");
+  assert.ok(visitorFollowUp.json().answer.length > 0, "AI remains available while a human manager is active");
   const humanEvents = await app.inject({ method: "GET", url: `/api/support/tickets/${handoffId}/events?after=0`, headers: clientHeaders });
   assert.ok(humanEvents.json().events.some((item) => item.role === "human"));
   assert.ok(humanEvents.json().events.some((item) => item.role === "customer" && /500套/.test(item.text)));
@@ -192,13 +197,13 @@ test("operations polling has an independent bucket while login and anonymous sup
   const config = loadConfig({
     NODE_ENV: "production", SUPPORT_PROVIDER: "mock", AUTH_MODE: "public", SESSION_BACKEND: "stateless", AI_SERVICE_ENABLED: "true",
     USER_HASH_SECRET: SESSION_SECRET, RATE_LIMIT_MAX: "2", RATE_LIMIT_WINDOW: "1 minute", OPERATIONS_ENABLED: "true", OPERATIONS_DATA_DIR: directory,
-    OPERATIONS_ADMIN_PASSWORD: ADMIN_PASSWORD, OPERATIONS_ADMIN_TOTP_SECRET: TOTP_SECRET, OPERATIONS_SESSION_SECRET: SESSION_SECRET,
+    OPERATIONS_ADMIN_PASSWORD: ADMIN_PASSWORD, OPERATIONS_SESSION_SECRET: SESSION_SECRET,
     OPERATIONS_DEVELOPER_TOKEN: DEVELOPER_TOKEN
   });
   const app = await buildApp(config);
   t.after(() => app.close());
 
-  const login = await app.inject({ method: "POST", url: "/api/admin/auth/login", payload: { username: "admin", password: ADMIN_PASSWORD, totp: totpCode(TOTP_SECRET) } });
+  const login = await app.inject({ method: "POST", url: "/api/admin/auth/login", payload: { username: "admin", password: ADMIN_PASSWORD } });
   assert.equal(login.statusCode, 200);
   const adminHeaders = { authorization: `Bearer ${login.json().token}` };
   const clientHeaders = { "x-client-id": "4bb89af4-8f24-4ef5-a31c-8d2be4a81a16" };
@@ -215,8 +220,8 @@ test("operations polling has an independent bucket while login and anonymous sup
   }
 
   for (let index = 0; index < 4; index += 1) {
-    const response = await app.inject({ method: "POST", url: "/api/admin/auth/login", payload: { username: "admin", password: "invalid-password", totp: "000000" } });
+    const response = await app.inject({ method: "POST", url: "/api/admin/auth/login", payload: { username: "admin", password: "invalid-password" } });
     assert.equal(response.statusCode, 401);
   }
-  assert.equal((await app.inject({ method: "POST", url: "/api/admin/auth/login", payload: { username: "admin", password: "invalid-password", totp: "000000" } })).statusCode, 429);
+  assert.equal((await app.inject({ method: "POST", url: "/api/admin/auth/login", payload: { username: "admin", password: "invalid-password" } })).statusCode, 429);
 });

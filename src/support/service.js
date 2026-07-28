@@ -2,12 +2,14 @@ import { classifyMessage, POLICY } from "./policy.js";
 import { newSessionId } from "../stores/session-store.js";
 
 export class SupportService {
-  constructor({ config, sessionStore, provider, handoff, operatorControl }) {
+  constructor({ config, sessionStore, provider, handoff, operatorControl, runtimeRules, runtimeRulesSource }) {
     this.config = config;
     this.sessionStore = sessionStore;
     this.provider = provider;
     this.handoff = handoff;
     this.operatorControl = operatorControl;
+    this.runtimeRules = runtimeRules;
+    this.runtimeRulesSource = runtimeRulesSource;
   }
 
   async chat({ identity, sessionId, message, options = {} }) {
@@ -24,6 +26,9 @@ export class SupportService {
       session = { history: [], unresolvedCount: 0, createdAt: new Date().toISOString() };
     }
 
+    if (this.runtimeRules && this.runtimeRulesSource) {
+      this.runtimeRules.set(await this.runtimeRulesSource.snapshot());
+    }
     const policy = classifyMessage(message);
     if (this.config.AUTH_MODE === "public" && POLICY.orderStatus.test(message)) {
       sessionId = (await this.sessionStore.save(identity.tenantId, identity.userId, sessionId, session)) || sessionId;
@@ -34,14 +39,17 @@ export class SupportService {
         citations: []
       };
     }
-    const operatorRequiresHuman = this.operatorControl && this.operatorControl.mode !== "auto";
-    if (!this.config.AI_SERVICE_ENABLED || operatorRequiresHuman || policy.action === "handoff") {
+    const runtimeDecision = policy.action === "handoff" ? null : this.runtimeRules?.evaluate(message);
+    const operatorMode = this.runtimeRules?.mode() || this.operatorControl?.mode;
+    const reviewMode = ["draft", "observe"].includes(operatorMode);
+    const operatorRequiresHuman = operatorMode === "paused";
+    if (!this.config.AI_SERVICE_ENABLED || operatorRequiresHuman || policy.action === "handoff" || runtimeDecision?.matched) {
       if (policy.reason === "restricted_business" && /投诉|complaint/i.test(message) && typeof this.provider.recordGovernanceSignal === "function") {
         void this.provider.recordGovernanceSignal({ sessionId, signal: "major_complaint" })?.catch(() => {});
       }
       if (this.config.AUTH_MODE === "public") {
         if (this.handoff.publicAvailable) {
-          const ticket = await this.handoff.create({ ...identity, sessionId, reason: policy.reason || "manual_required", unresolvedQuestion: message });
+          const ticket = await this.handoff.create({ ...identity, sessionId, reason: runtimeDecision?.reason || policy.reason || "manual_required", unresolvedQuestion: message });
           session.handoffTicketId = ticket.id;
           sessionId = (await this.sessionStore.save(identity.tenantId, identity.userId, sessionId, session)) || sessionId;
           return { sessionId, action: "handoff", answer: "这项业务需要人工人员继续处理，您的服务请求已进入待处理队列。", ticketId: ticket.id, citations: [] };
@@ -55,7 +63,7 @@ export class SupportService {
           citations: []
         };
       }
-      const reason = !this.config.AI_SERVICE_ENABLED ? "kill_switch" : operatorRequiresHuman ? `operator_mode_${this.operatorControl.mode}` : policy.reason;
+      const reason = !this.config.AI_SERVICE_ENABLED ? "kill_switch" : operatorRequiresHuman ? `operator_mode_${operatorMode}` : runtimeDecision?.reason || policy.reason;
       const ticket = await this.handoff.create({ ...identity, sessionId, reason, unresolvedQuestion: message });
       session.handoffTicketId = ticket.id;
       sessionId = (await this.sessionStore.save(identity.tenantId, identity.userId, sessionId, session)) || sessionId;
@@ -64,7 +72,7 @@ export class SupportService {
         action: "handoff",
         answer: operatorRequiresHuman
           ? "当前由人工审核和接管回复，我已为你建立人工服务请求。"
-          : policy.reason === "restricted_business"
+          : policy.reason === "restricted_business" || runtimeDecision?.matched
           ? "这项业务需要人工客服核验和处理，我已为你建立人工服务请求。"
           : "已为你建立人工服务请求，客服会按队列继续处理。",
         ticketId: ticket.id,
@@ -72,7 +80,14 @@ export class SupportService {
       };
     }
 
-    const result = await this.provider.answer({ message, identity, session, sessionId, options });
+    const result = await this.provider.answer({
+      message,
+      identity,
+      session,
+      sessionId,
+      options,
+      runtimePolicy: this.runtimeRules?.generationContext()
+    });
     if (result.action === "handoff_required") {
       const historyLimit = this.config.SESSION_BACKEND === "stateless" ? 4 : 8;
       session.history = [...session.history, { user: message, assistant: result.answer }].slice(-historyLimit);
@@ -98,12 +113,52 @@ export class SupportService {
       sessionId = (await this.sessionStore.save(identity.tenantId, identity.userId, sessionId, session)) || sessionId;
       return { sessionId, action: "handoff", answer: result.answer, ticketId: ticket.id, citations: [] };
     }
+    if (reviewMode) {
+      const ticket = await this.handoff.create({
+        ...identity,
+        sessionId,
+        reason: `operator_mode_${operatorMode}`,
+        unresolvedQuestion: message
+      });
+      if (typeof this.handoff.queueDraft !== "function") {
+        session.handoffTicketId = ticket.id;
+        sessionId = (await this.sessionStore.save(identity.tenantId, identity.userId, sessionId, session)) || sessionId;
+        return {
+          sessionId,
+          action: "handoff",
+          answer: "当前答复需要人工审核，已为你建立人工服务请求。",
+          ticketId: ticket.id,
+          citations: []
+        };
+      }
+      await this.handoff.queueDraft({
+        ...identity,
+        sessionId,
+        ticketId: ticket.id,
+        mode: operatorMode,
+        content: result.answer,
+        citations: result.citations || [],
+        grounded: result.grounded,
+        responseId: result.responseId
+      });
+      session.handoffTicketId = ticket.id;
+      sessionId = (await this.sessionStore.save(identity.tenantId, identity.userId, sessionId, session)) || sessionId;
+      return {
+        sessionId,
+        action: "draft_pending",
+        answer: operatorMode === "observe"
+          ? "AI 已完成内部建议，正在由勤益人工人员确认后回复。"
+          : "答复草稿已生成，正在由勤益人工人员审核后发送。",
+        ticketId: ticket.id,
+        citations: []
+      };
+    }
     session.unresolvedCount = result.grounded ? 0 : session.unresolvedCount + 1;
     const historyLimit = this.config.SESSION_BACKEND === "stateless" ? 4 : 8;
     session.history = [...session.history, { user: message, assistant: result.answer }].slice(-historyLimit);
     session.lastResponseId = result.responseId;
 
-    if (session.unresolvedCount >= 3) {
+    if (session.unresolvedCount >= 3 && (!this.runtimeRules || this.runtimeRules.enabled("missing_knowledge"))) {
       if (this.config.AUTH_MODE === "public") {
         if (this.handoff.publicAvailable) {
           const ticket = await this.handoff.create({ ...identity, sessionId, reason: "repeated_unresolved", unresolvedQuestion: message });

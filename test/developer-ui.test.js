@@ -18,3 +18,11 @@ test("developer UI labels unavailable telemetry and filters completed traces", (
   assert.match(developerSource, /metrics\.p95LatencyMs == null \? "监控未接入"/);
   assert.match(developerHtml, /<option value="complete">成功<\/option>/);
 });
+
+test("developer release view exposes real CMS and SEO/GEO rollback controls", () => {
+  assert.match(developerHtml, /id="managedVersionTable"/);
+  assert.match(developerSource, /\/api\/ops\/content\/versions/);
+  assert.match(developerSource, /\/api\/ops\/seo-geo\/versions/);
+  assert.match(developerSource, /data-managed-version-id/);
+  assert.match(developerSource, /rollbackManagedVersion/);
+});

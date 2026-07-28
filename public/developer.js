@@ -18,7 +18,7 @@
 
   const Ops = window.QinyiOps;
   const loaded = new Set();
-  const loaders = { systems: loadSystems, traces: loadTraces, releases: loadReleases, environment: loadEnvironment, emergency: loadEmergency };
+  const loaders = { systems: loadSystems, traces: loadTraces, releases: loadReleases, environment: loadEnvironment, emergency: loadEmergency, analytics: loadDeveloperAnalytics, orders: loadDeveloperOrders, seo: loadDeveloperSeo, schedule: loadDeveloperSchedule };
   let currentView = "systems";
   let shell;
   let traceItems = [];
@@ -50,7 +50,7 @@
   }
 
   function metricCard(label, value, unit, detail) {
-    return `<article class="metric"><div><div class="metric-label">${Ops.escapeHtml(label)}</div><div class="metric-value">${Ops.escapeHtml(value == null ? "--" : value)}${unit ? `<small>${Ops.escapeHtml(unit)}</small>` : ""}</div></div><div class="metric-foot"><span>${Ops.escapeHtml(detail || "")}</span></div></article>`;
+    return `<article class="metric"><div><div class="metric-label">${Ops.escapeHtml(label)}</div><div class="metric-value">${Ops.escapeHtml(value == null ? "待补充" : value)}${unit ? `<small>${Ops.escapeHtml(unit)}</small>` : ""}</div></div><div class="metric-foot"><span>${Ops.escapeHtml(detail || "")}</span></div></article>`;
   }
 
   function systemCard(item) {
@@ -58,6 +58,27 @@
     const progress = Number.isFinite(Number(item.capacityPercent)) ? Math.max(0, Math.min(100, Number(item.capacityPercent))) : 0;
     const primaryValue = item.primaryValue || item.value || item.latencyMs || "--";
     return `<article class="system-card" data-tone="${tone}"><div class="system-card-head"><h2>${Ops.escapeHtml(item.name || item.id || "系统")}</h2>${Ops.statusBadge(item.status, item.statusLabel)}</div><div class="system-card-value">${Ops.escapeHtml(primaryValue)}${item.latencyMs && !item.primaryValue && !item.value ? " ms" : ""}</div><p>${Ops.escapeHtml(item.detail || item.description || "暂无补充说明")}</p><progress class="system-progress" value="${progress}" max="100" aria-label="容量使用 ${progress}%"></progress></article>`;
+  }
+
+  async function loadDeveloperOrders() {
+    ["developerOrderMetrics", "developerCustomerStages", "developerProductionStages"].forEach((id) => Ops.setBusy(document.getElementById(id)));
+    try {
+      const data = await Ops.request("/api/developer/order-system");
+      setHtml("developerOrderMetrics", `${metricCard("全部订单", data.orders?.total, "", "持久化记录")}${metricCard("进行中", data.orders?.active, "", "当前")}${metricCard("短信登录", data.sms?.configured ? "已配置" : "待补充", "", data.sms?.provider || "")}`);
+      const rows = (items) => `<div class="row-list">${Ops.list(items).map((item) => `<div class="row-item"><div class="row-main"><strong>${item.index + 1}. ${Ops.escapeHtml(item.labelZh)}</strong><small>${Ops.escapeHtml(item.labelEn)} · ${Ops.escapeHtml(item.id)}</small></div>${Ops.statusBadge("healthy", "固定")}</div>`).join("")}</div>`;
+      setHtml("developerCustomerStages", rows(data.customerStages));
+      setHtml("developerProductionStages", rows(data.productionStages));
+      document.getElementById("developerOrderSettingsJson").value = JSON.stringify(data.settings || { customerVisibleProduction: true, customerStageSlaDays: {}, productionStageSlaHours: {} }, null, 2);
+    } catch (error) { ["developerOrderMetrics", "developerCustomerStages", "developerProductionStages"].forEach((id) => setHtml(id, Ops.errorState(error, "orders"))); }
+  }
+
+  async function saveOrderSettings() {
+    try {
+      const value = JSON.parse(document.getElementById("developerOrderSettingsJson").value);
+      await Ops.request("/api/developer/order-system/settings", { method: "PUT", body: value });
+      Ops.toast("订单系统参数已更新");
+      await loadDeveloperOrders();
+    } catch (error) { Ops.toast(error.message, "negative"); }
   }
 
   async function loadSystems() {
@@ -134,13 +155,30 @@
 
   async function loadReleases() {
     Ops.setBusy(document.getElementById("releaseTable"), "正在读取发布队列");
+    Ops.setBusy(document.getElementById("managedVersionTable"), "正在读取内容版本");
     try {
-      const data = await Ops.request("/api/ops/developer/releases?limit=60");
+      const [data, contentVersions, seoVersions] = await Promise.all([
+        Ops.request("/api/ops/developer/releases?limit=60"),
+        Ops.request("/api/ops/content/versions"),
+        Ops.request("/api/ops/seo-geo/versions")
+      ]);
       releaseItems = Ops.list(data);
       renderReleaseTable();
       const pending = releaseItems.filter((item) => item.status === "pending").length;
       document.getElementById("releaseQueueStatus").innerHTML = Ops.statusBadge(pending ? "pending" : "healthy", pending ? `${pending} 个待审批` : "队列已清空");
-    } catch (error) { setHtml("releaseTable", Ops.errorState(error, "releases")); }
+      const managedVersions = [
+        ...Ops.list(contentVersions).map((item) => ({ ...item, kind: "content", label: "网站内容" })),
+        ...Ops.list(seoVersions).map((item) => ({ ...item, kind: "seo", label: "SEO/GEO" }))
+      ].sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+      setHtml("managedVersionTable", managedVersions.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>范围</th><th>版本</th><th>来源</th><th>发布人</th><th>时间</th><th>操作</th></tr></thead><tbody>${managedVersions.map((item) => `<tr><td>${Ops.escapeHtml(item.label)}</td><td><span class="cell-title">${Ops.escapeHtml(item.id)}</span><span class="cell-subtitle">业务版本 ${Ops.escapeHtml(item.revision)}</span></td><td>${Ops.escapeHtml(item.source || "manual_publish")}</td><td>${Ops.escapeHtml(item.actor || "system")}</td><td>${Ops.formatTime(item.createdAt, true)}</td><td><button class="button button--danger button--small" type="button" data-managed-version-kind="${item.kind}" data-managed-version-id="${Ops.escapeHtml(item.id)}">回滚到此版本</button></td></tr>`).join("")}</tbody></table></div>` : Ops.emptyState("尚无 CMS 或 SEO/GEO 发布版本", "管理员批准首个候选后会形成回滚点。"));
+    } catch (error) { setHtml("releaseTable", Ops.errorState(error, "releases")); setHtml("managedVersionTable", Ops.errorState(error, "managed-versions")); }
+  }
+
+  async function rollbackManagedVersion(kind, versionId) {
+    if (!window.confirm("确认回滚到此版本？系统会保留当前历史，并创建一个新的发布版本。")) return;
+    const path = kind === "seo" ? `/api/ops/seo-geo/versions/${endpointId(versionId)}/rollback` : `/api/ops/content/versions/${endpointId(versionId)}/rollback`;
+    try { await Ops.request(path, { method: "POST", body: {} }); Ops.toast("回滚完成，新的审计版本已生成"); await loadReleases(); }
+    catch (error) { Ops.toast(error.message, "negative"); }
   }
 
   async function loadReleaseDetail(id) {
@@ -188,6 +226,39 @@
   async function verifyIntegrations() {
     try { await Ops.request("/api/ops/developer/integrations/verify", { method: "POST", body: {} }); Ops.toast("验证任务已启动"); window.setTimeout(loadEnvironment, 1200); }
     catch (error) { Ops.toast(error.message, "negative"); }
+  }
+
+  async function loadDeveloperAnalytics() {
+    ["developerAnalyticsMetrics", "developerAnalyticsPolicy"].forEach((id) => Ops.setBusy(document.getElementById(id)));
+    try {
+      const data = await Ops.request("/api/developer/analytics");
+      const traffic = data.traffic || {};
+      setHtml("developerAnalyticsMetrics", `${metricCard("页面访问", traffic.pageViews, "", "匿名聚合")}${metricCard("有效点击", traffic.clicks, "", "导航与入口")}${metricCard("事件总量", traffic.totalMeaningfulEvents, "", "白名单事件")}${metricCard("原始保留", data.rawEventCount, "条", "90天")}`);
+      setHtml("developerAnalyticsPolicy", `<div class="row-list"><div class="row-item"><div class="row-main"><strong>原始事件</strong><small>自动清理期限</small></div><strong>${data.rawRetentionDays} 天</strong></div><div class="row-item"><div class="row-main"><strong>聚合指标</strong><small>用于经营趋势</small></div><strong>${data.aggregateRetentionMonths} 个月</strong></div><div class="row-item"><div class="row-main"><strong>隐私边界</strong><small>原始 IP、聊天正文、表单正文</small></div>${Ops.statusBadge("healthy", "不保存")}</div></div>`);
+    } catch (error) { ["developerAnalyticsMetrics", "developerAnalyticsPolicy"].forEach((id) => setHtml(id, Ops.errorState(error, "analytics"))); }
+  }
+
+  async function loadDeveloperSeo() {
+    ["developerSeoMetrics", "developerSeoDetail"].forEach((id) => Ops.setBusy(document.getElementById(id)));
+    try {
+      const data = await Ops.request("/api/ops/developer/seo-geo");
+      setHtml("developerSeoMetrics", `${metricCard("SEO健康", data.siteHealth?.score, "", data.siteHealth?.message)}${metricCard("搜索点击", data.searchPerformance?.clicks, "", data.searchPerformance?.message)}${metricCard("GEO引用", data.geoVisibility?.citations, "", data.geoVisibility?.message)}${metricCard("版本", data.revision, "", data.status)}`);
+      setHtml("developerSeoDetail", `<div class="row-list">${(data.connectors || []).map((item) => `<div class="row-item"><div class="row-main"><strong>${Ops.escapeHtml(item.name)}</strong><small>${item.status === "waiting_configuration" ? "待补充" : Ops.escapeHtml(item.status)}</small></div>${Ops.statusBadge(item.status, item.status === "waiting_configuration" ? "待补充" : item.status)}</div>`).join("")}</div><p class="cell-subtitle">技术输出：${Object.entries(data.technical || {}).filter(([, value]) => value).map(([key]) => key).join("、") || "待补充"}</p>`);
+    } catch (error) { ["developerSeoMetrics", "developerSeoDetail"].forEach((id) => setHtml(id, Ops.errorState(error, "seo"))); }
+  }
+
+  async function loadDeveloperSchedule() {
+    Ops.setBusy(document.getElementById("developerScheduleJson"));
+    try { const data = await Ops.request("/api/developer/operator-schedule"); document.getElementById("developerScheduleJson").value = JSON.stringify(data.schedule || data, null, 2); }
+    catch (error) { document.getElementById("developerScheduleJson").value = error.message; }
+  }
+
+  async function saveDeveloperSchedule() {
+    try {
+      const value = JSON.parse(document.getElementById("developerScheduleJson").value);
+      await Ops.request("/api/developer/operator-schedule", { method: "PUT", body: value });
+      Ops.toast("全站人工排班已更新");
+    } catch (error) { Ops.toast(error.message, "negative"); }
   }
 
   async function loadEmergency() {
@@ -243,8 +314,11 @@
     document.getElementById("releaseTable").addEventListener("click", (event) => { const row = event.target.closest("[data-release-id]"); if (row) loadReleaseDetail(row.dataset.releaseId); });
     document.getElementById("releaseTable").addEventListener("keydown", (event) => { const row = event.target.closest("[data-release-id]"); if (row && ["Enter", " "].includes(event.key)) { event.preventDefault(); loadReleaseDetail(row.dataset.releaseId); } });
     document.getElementById("releaseDetail").addEventListener("click", (event) => { const button = event.target.closest("[data-release-action]"); if (button) releaseAction(button.dataset.releaseAction); });
+    document.getElementById("managedVersionTable").addEventListener("click", (event) => { const button = event.target.closest("[data-managed-version-id]"); if (button) rollbackManagedVersion(button.dataset.managedVersionKind, button.dataset.managedVersionId); });
     document.getElementById("verifyIntegrationsButton").addEventListener("click", verifyIntegrations);
     document.getElementById("emergencyActions").addEventListener("click", (event) => { const button = event.target.closest("[data-emergency-action]"); if (button) emergencyAction(button.dataset.emergencyAction, button.dataset.risk); });
+    document.getElementById("saveDeveloperSchedule").addEventListener("click", saveDeveloperSchedule);
+    document.getElementById("saveOrderSettings").addEventListener("click", saveOrderSettings);
   }
 
   bindEvents();

@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Fastify from "fastify";
 import rateLimit from "@fastify/rate-limit";
+import multipart from "@fastify/multipart";
 import { z } from "zod";
 import { createSessionStore } from "./stores/session-store.js";
 import { MockSupportProvider } from "./providers/mock-provider.js";
@@ -20,6 +21,15 @@ import { createOperationsStore } from "./operations/store.js";
 import { OperationsAuthService } from "./operations/auth.js";
 import { OperationsHandoffAdapter, OperationsService } from "./operations/service.js";
 import { registerOperationsRoutes } from "./operations/routes.js";
+import { registerWorkflowRoutes } from "./operations/workflow-routes.js";
+import { ContentGovernanceService } from "./operations/content-governance.js";
+import { registerContentGovernanceRoutes } from "./operations/content-routes.js";
+import { SecureUploadService, registerSecureUploadRoutes } from "./operations/secure-uploads.js";
+import { createObjectStore } from "./operations/object-store.js";
+import { OrderSystemService } from "./operations/order-system.js";
+import { registerOrderRoutes } from "./operations/order-routes.js";
+import { createSmsProvider } from "./operations/sms-provider.js";
+import { OperationsRuntimeRulesSource, RuntimeRulesControl } from "./operations/runtime-rules.js";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OPERATIONS_RATE_LIMIT_MAX = 240;
@@ -105,12 +115,18 @@ export async function buildApp(config) {
     trustProxy: config.TRUST_PROXY ? 1 : false,
     logger: {
       level: config.NODE_ENV === "test" ? "silent" : "info",
-      redact: ["req.headers.authorization", "req.headers.cookie", "req.body.password", "req.body.totp", "req.body.message", "req.body.reason", "req.body.value"]
+      redact: ["req.headers.authorization", "req.headers.cookie", "req.body.password", "req.body.message", "req.body.reason", "req.body.value"]
     }
   });
   const sessionStore = await createSessionStore(config);
   const operationsStore = config.OPERATIONS_ENABLED ? await createOperationsStore(config, rootDir) : null;
   const operations = operationsStore ? new OperationsService({ store: operationsStore }) : null;
+  const contentGovernance = operationsStore ? new ContentGovernanceService({ store: operationsStore }) : null;
+  const objectStore = operationsStore ? createObjectStore(config) : null;
+  if (objectStore) await objectStore.init();
+  const secureUploads = operationsStore
+    ? await new SecureUploadService({ directory: path.resolve(rootDir, config.UPLOAD_DATA_DIR), store: operationsStore, objectStore }).init()
+    : null;
   const thoughtMemory = await createThoughtMemory(config, rootDir);
   const knowledgeDir = path.join(rootDir, "knowledge", process.env.VERCEL ? "curated" : "prepared");
   const playbookDir = path.join(rootDir, "service-playbook");
@@ -130,14 +146,19 @@ export async function buildApp(config) {
   });
   stageGovernor.setStageAnalyzer((snapshot) => provider.analyzeStage(snapshot));
   const operatorControl = new OperatorControlPlane({ mode: config.OPERATOR_MODE, agents: provider.agents });
+  const runtimeRules = operations ? new RuntimeRulesControl({ mode: config.OPERATOR_MODE }) : null;
+  const runtimeRulesSource = operations ? new OperationsRuntimeRulesSource(operations) : null;
   const applySystemConfig = async (settings = {}) => {
     if (typeof settings.aiEnabled === "boolean") config.AI_SERVICE_ENABLED = settings.aiEnabled;
     if (settings.operatorMode) operatorControl.setMode(settings.operatorMode);
+    if (runtimeRules && (settings.rules || settings.operatorMode)) {
+      runtimeRules.set(settings.rules || runtimeRules.snapshot(), { mode: settings.operatorMode });
+    }
   };
   if (operations) await applySystemConfig(await operations.getSystemConfig());
   app.decorate("operatorControl", operatorControl);
   if (operations) app.decorate("operations", operations);
-  const support = new SupportService({ config, sessionStore, provider, handoff: operations ? new OperationsHandoffAdapter(operations) : new DemoHandoffAdapter(), operatorControl });
+  const support = new SupportService({ config, sessionStore, provider, handoff: operations ? new OperationsHandoffAdapter(operations) : new DemoHandoffAdapter(), operatorControl, runtimeRules, runtimeRulesSource });
 
   await app.register(rateLimit, {
     max: (request) => rateLimitBucket(request) === "operations" ? OPERATIONS_RATE_LIMIT_MAX : config.RATE_LIMIT_MAX,
@@ -148,6 +169,9 @@ export async function buildApp(config) {
       const visitor = request.headers["x-client-id"] || request.headers["x-demo-user-id"] || request.headers["x-user-id"] || "anonymous";
       return `${bucket}:${request.ip}:${visitor}`;
     }
+  });
+  await app.register(multipart, {
+    limits: { fileSize: 100 * 1024 * 1024, files: 1, fields: 8, parts: 9, fieldSize: 20_000 }
   });
 
   app.addHook("onRequest", async (request, reply) => {
@@ -178,14 +202,48 @@ export async function buildApp(config) {
   app.get("/developer.js", (_, reply) => staticFile(reply, "developer.js", "text/javascript; charset=utf-8"));
 
   app.get("/health/live", async () => ({ ok: true }));
-  app.get("/health/ready", async () => ({ ok: true, provider: "agent-company", sessionBackend: config.SESSION_BACKEND }));
+  app.get("/health/ready", async (_, reply) => {
+    const dependencies = {
+      operationsStore: operationsStore ? "checking" : "disabled",
+      objectStore: objectStore ? "checking" : config.UPLOAD_STORE === "file" ? "local_file" : "disabled",
+      sms: config.ORDER_SMS_PROVIDER === "http" ? "configured_not_probed" : config.ORDER_SMS_PROVIDER,
+      aiProvider: `${config.SUPPORT_PROVIDER}_configured_not_probed`
+    };
+    let ok = true;
+    if (operationsStore) {
+      try {
+        await operationsStore.read(() => true);
+        dependencies.operationsStore = "ready";
+      } catch {
+        dependencies.operationsStore = "unavailable";
+        ok = false;
+      }
+    }
+    if (objectStore) {
+      try {
+        await objectStore.health();
+        dependencies.objectStore = "ready";
+      } catch {
+        dependencies.objectStore = "unavailable";
+        ok = false;
+      }
+    }
+    return reply.code(ok ? 200 : 503).send({
+      ok,
+      provider: "agent-company",
+      sessionBackend: config.SESSION_BACKEND,
+      dependencies,
+      note: "短信和 AI 提供方需在预发布环境单独完成真实验收。"
+    });
+  });
   app.get("/api/support/status", async () => ({
     provider: "agent-company",
     aiEnabled: config.AI_SERVICE_ENABLED,
     publicMode: config.AUTH_MODE === "public",
     operationsEnabled: Boolean(operations),
     sessionBackend: config.SESSION_BACKEND,
-    operatorMode: operatorControl.mode,
+    operatorMode: runtimeRules?.mode() || operatorControl.mode,
+    runtimeRulesRevision: runtimeRules?.snapshot().revision,
     agentCompany: true,
     agents: operatorControl.status().agentCompany,
     replyBudgets: {
@@ -200,34 +258,23 @@ export async function buildApp(config) {
     const body = parse(chatSchema, request.body);
     if (body.message.length > config.MAX_MESSAGE_CHARS) return reply.code(400).send({ error: `消息不能超过 ${config.MAX_MESSAGE_CHARS} 个字符。`, requestId: request.id });
     const identity = identityFor(request, config);
-    if (operations && body.sessionId) {
-      const activeHandoff = await operations.activeHandoff({
+    const activeHandoff = operations && body.sessionId
+      ? await operations.activeHandoff({
         tenantId: identity.tenantId,
         visitorId: identity.userId,
         sessionId: body.sessionId
-      });
-      if (activeHandoff) {
-        const visitorUpdate = await operations.addVisitorMessage({
-          tenantId: identity.tenantId,
-          visitorId: identity.userId,
-          sessionId: body.sessionId,
-          content: body.message
-        });
-        const currentHandoff = visitorUpdate?.handoff || activeHandoff;
-        return {
-          sessionId: body.sessionId,
-          action: "handoff",
-          ticketId: currentHandoff.id,
-          handoff: { ticketId: currentHandoff.id, status: currentHandoff.status, updatedAt: currentHandoff.updatedAt },
-          answer: "",
-          citations: [],
-          requestId: request.id
-        };
-      }
-    }
+      })
+      : null;
     const result = await support.chat({ identity, ...body });
     if (operations) await operations.recordExchange({ tenantId: identity.tenantId, visitorId: identity.userId, sessionId: result.sessionId, message: body.message, result, options: body.options });
-    const handoff = result.ticketId ? { ticketId: result.ticketId, status: "waiting_human", updatedAt: new Date().toISOString() } : undefined;
+    const currentHandoff = result.ticketId
+      ? await operations?.activeHandoff({ tenantId: identity.tenantId, visitorId: identity.userId, sessionId: result.sessionId })
+      : activeHandoff;
+    const handoff = currentHandoff
+      ? { ticketId: currentHandoff.id, status: currentHandoff.status, updatedAt: currentHandoff.updatedAt }
+      : result.ticketId
+        ? { ticketId: result.ticketId, status: "waiting_human", updatedAt: new Date().toISOString() }
+        : undefined;
     return { ...result, ...(handoff ? { handoff } : {}), requestId: request.id };
   });
 
@@ -264,17 +311,36 @@ export async function buildApp(config) {
       store: operationsStore,
       accounts: config.operationsUsers,
       password: config.OPERATIONS_ADMIN_PASSWORD,
-      totpSecret: config.OPERATIONS_ADMIN_TOTP_SECRET,
       sessionSecret: config.OPERATIONS_SESSION_SECRET,
       ttlSeconds: config.OPERATIONS_SESSION_TTL_SECONDS
     });
+    await operationsAuth.initialize();
+    const smsProvider = createSmsProvider(config);
+    const orderSystem = new OrderSystemService({ store: operationsStore, sessionSecret: config.OPERATIONS_SESSION_SECRET, smsProvider });
     await registerOperationsRoutes(app, { config, service: operations, auth: operationsAuth, identityFor, applySystemConfig });
+    await registerWorkflowRoutes(app, { service: operations, auth: operationsAuth, aiConfigured: config.AI_SERVICE_ENABLED });
+    await registerOrderRoutes(app, { orderSystem, auth: operationsAuth });
+    await registerContentGovernanceRoutes(app, {
+      service: contentGovernance,
+      auth: operationsAuth,
+      siteBaseUrl: config.PUBLIC_SITE_URL,
+      apiBaseUrl: config.PUBLIC_API_URL
+    });
+    await registerSecureUploadRoutes(app, {
+      uploader: secureUploads,
+      auth: operationsAuth,
+      identityFor: (request) => identityFor(request, config),
+      sessionStore,
+      contentService: contentGovernance
+    });
   }
 
   app.setErrorHandler((error, request, reply) => {
-    const statusCode = error.statusCode && error.statusCode < 500 ? error.statusCode : 500;
+    const requestedStatus = Number(error.statusCode);
+    const statusCode = Number.isInteger(requestedStatus) && requestedStatus >= 400 && requestedStatus <= 599 ? requestedStatus : 500;
+    const exposeMessage = statusCode < 500 || error.safeToExpose === true;
     if (statusCode >= 500) request.log.error({ err: error, requestId: request.id }, "request_failed");
-    reply.code(statusCode).send({ error: statusCode >= 500 ? "服务繁忙，请稍后再试。" : error.message, requestId: request.id });
+    reply.code(statusCode).send({ error: exposeMessage ? error.message : "服务繁忙，请稍后再试。", ...(error.errorCode ? { errorCode: error.errorCode } : {}), requestId: request.id });
   });
 
   app.addHook("onClose", async () => {

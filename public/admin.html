@@ -22,16 +22,21 @@
             <p class="ops-nav-label">日常工作</p>
             <button type="button" data-nav="dashboard" data-title="工作台"><span class="nav-icon">首</span>工作台</button>
             <button type="button" data-nav="sessions" data-title="实时会话"><span class="nav-icon">聊</span>实时会话</button>
+            <button type="button" data-nav="orders" data-title="订单管理"><span class="nav-icon">单</span>订单管理</button>
           </div>
           <div class="ops-nav-group">
             <p class="ops-nav-label">经营信息</p>
             <button type="button" data-nav="important" data-title="重要信息"><span class="nav-icon">要</span>重要信息</button>
             <button type="button" data-nav="content" data-title="网站内容"><span class="nav-icon">文</span>网站内容</button>
+            <button type="button" data-nav="analytics" data-title="访问与转化"><span class="nav-icon">数</span>访问与转化</button>
+            <button type="button" data-nav="seo" data-title="SEO与GEO"><span class="nav-icon">搜</span>SEO与GEO</button>
             <button type="button" data-nav="notifications" data-title="通知设置"><span class="nav-icon">知</span>通知设置</button>
           </div>
           <div class="ops-nav-group">
             <p class="ops-nav-label">服务治理</p>
             <button type="button" data-nav="rules" data-title="客服规则"><span class="nav-icon">规</span>客服规则</button>
+            <button type="button" data-nav="schedule" data-title="排班与值班"><span class="nav-icon">班</span>排班与值班</button>
+            <button type="button" data-nav="profile" data-title="我的账号"><span class="nav-icon">我</span>我的账号</button>
             <button type="button" data-nav="audit" data-title="操作记录"><span class="nav-icon">录</span>操作记录</button>
           </div>
         </nav>
@@ -85,15 +90,61 @@
             </div>
           </section>
 
+          <section class="view" data-view="orders" aria-labelledby="ordersTitle" hidden>
+            <div class="page-heading"><div><h1 id="ordersTitle">订单管理</h1><p>查看全部客户订单，并按商务流程与工厂工序逐步推进。</p></div><div class="page-actions"><button class="button" type="button" id="newOrderButton">新建订单</button></div></div>
+            <div class="metric-grid" id="orderMetrics"></div>
+            <div class="dashboard-grid dashboard-grid--equal">
+              <section class="panel"><header class="panel-header"><div class="panel-title"><h2>待转订单询价</h2><p>选择询价后自动带入客户与需求资料</p></div></header><div class="panel-body panel-body--flush" id="orderQuoteQueue"></div></section>
+              <form class="panel" id="newOrderForm"><header class="panel-header"><div class="panel-title"><h2>建立订单</h2><p>可关联询价，也可直接录入线下订单</p></div></header><div class="panel-body"><div class="form-grid">
+                <div class="field field--wide"><label for="orderQuoteId">关联询价</label><select id="orderQuoteId" name="quoteId"><option value="">不关联询价</option></select></div>
+                <div class="field"><label for="orderCustomerPhone">客户手机</label><input id="orderCustomerPhone" name="customerPhone" type="tel" autocomplete="tel" required /></div>
+                <div class="field"><label for="orderTitle">订单名称</label><input id="orderTitle" name="title" maxlength="200" required /></div>
+                <div class="field field--wide"><label for="orderSummary">需求摘要</label><textarea id="orderSummary" name="summary" maxlength="4000"></textarea></div>
+                <div class="field field--wide"><label for="orderExternalReference">外部单号（可选）</label><input id="orderExternalReference" name="externalReference" maxlength="120" /></div>
+              </div><div class="form-actions"><button class="button button--secondary" type="reset">清空</button><button class="button" type="submit">确认建立订单</button></div></div></form>
+            </div>
+            <section class="panel"><header class="panel-header"><div class="panel-title"><h2>客户订单</h2><p>固定流程、逐步流转、全部操作进入审计</p></div></header><div class="panel-body panel-body--flush" id="orderTable"></div></section>
+            <section class="panel"><header class="panel-header"><div class="panel-title"><h2>订单详情与推进</h2><p>选择订单后查看完整时间线</p></div></header><div class="panel-body" id="orderDetail"></div></section>
+          </section>
+
           <section class="view" data-view="important" aria-labelledby="importantTitle" hidden>
             <div class="page-heading"><div><h1 id="importantTitle">重要信息</h1><p>维护客服回答必须优先采用的联系方式、产能、假期和业务边界。</p></div><div class="page-actions"><button class="button button--secondary" type="button" id="importantPreviewButton">预览变更</button><button class="button" type="submit" form="importantForm">保存草稿</button></div></div>
             <form class="panel" id="importantForm"><div class="panel-body" id="importantFormBody"></div></form>
           </section>
 
           <section class="view" data-view="content" aria-labelledby="contentTitle" hidden>
-            <div class="page-heading"><div><h1 id="contentTitle">网站内容</h1><p>按页面管理草稿、预览和发布状态，正式发布前仍需审批。</p></div><div class="page-actions"><button class="button" type="button" id="newContentButton">新建内容</button></div></div>
-            <div class="filterbar"><input class="search-input" id="contentSearch" type="search" placeholder="搜索标题或页面" aria-label="搜索网站内容" /><select id="contentStatusFilter" aria-label="筛选内容状态"><option value="">全部状态</option><option value="draft">草稿</option><option value="pending">待审核</option><option value="approved">已批准</option><option value="published">已发布</option></select></div>
-            <section class="panel"><div class="panel-body panel-body--flush" id="contentTable"></div></section>
+            <div class="page-heading"><div><h1 id="contentTitle">网站内容</h1><p>页面、导航、文字、图片、模型和定制步骤均由结构化字段管理。</p></div><div class="page-actions"><button class="button button--secondary" type="button" id="newContentButton">新增模板页面</button><button class="button button--secondary" type="button" id="previewWorkspaceButton">预览当前页面</button><button class="button button--secondary" type="button" id="saveWorkspaceButton">保存草稿</button><button class="button" type="button" id="publishWorkspaceButton">提交 Agent 审核</button></div></div>
+            <div class="filterbar"><input class="search-input" id="contentSearch" type="search" placeholder="搜索页面或地址" aria-label="搜索网站内容" /><select id="contentStatusFilter" aria-label="筛选内容状态"><option value="">全部状态</option><option value="draft">草稿</option><option value="published">已发布</option><option value="retired">已下架</option></select></div>
+            <div class="content-workspace">
+              <section class="panel"><header class="panel-header"><div class="panel-title"><h2>页面与导航</h2><p id="workspaceRevision">正在读取版本</p></div></header><div class="panel-body panel-body--flush" id="contentTable"></div></section>
+              <section class="panel"><header class="panel-header"><div class="panel-title"><h2>页面编辑</h2><p>中英文均为事实主版本，缺失时不能发布</p></div></header><form class="panel-body" id="pageEditorForm"><div id="pageEditor">从左侧选择一个页面。</div></form></section>
+            </div>
+            <section class="panel"><header class="panel-header"><div class="panel-title"><h2>图片与模型素材</h2><p>图片不超过 50MB；模型支持单文件 GLB/glTF，不超过 100MB</p></div><div class="page-actions"><label class="button button--secondary button--small" for="contentImageUpload">上传图片</label><input id="contentImageUpload" type="file" accept="image/jpeg,image/png,image/webp" hidden><label class="button button--secondary button--small" for="contentModelUpload">上传模型</label><input id="contentModelUpload" type="file" accept=".glb,.gltf,model/gltf-binary,model/gltf+json" hidden></div></header><div class="panel-body panel-body--flush" id="contentAssetLibrary"></div></section>
+            <section class="panel"><header class="panel-header"><div class="panel-title"><h2>Agent 修改任务</h2><p>B 生成、C 审核、A 等待批准、D 记录改良建议</p></div><button class="button button--secondary button--small" type="button" id="newAgentChangeButton">创建修改任务</button></header><div class="panel-body panel-body--flush" id="agentChangeTable"></div></section>
+          </section>
+
+          <section class="view" data-view="analytics" aria-labelledby="analyticsTitle" hidden>
+            <div class="page-heading"><div><h1 id="analyticsTitle">访问与转化</h1><p>仅统计匿名、白名单化的经营事件，不保存聊天正文、表单正文或原始 IP。</p></div></div>
+            <div class="metric-grid" id="analyticsMetrics"></div>
+            <div class="dashboard-grid dashboard-grid--equal"><section class="panel"><header class="panel-header"><div class="panel-title"><h2>热门页面</h2><p>匿名页面浏览与入口点击</p></div></header><div class="panel-body" id="analyticsPages"></div></section><section class="panel"><header class="panel-header"><div class="panel-title"><h2>转化事件</h2><p>定制、报价、客服与人工请求</p></div></header><div class="panel-body" id="analyticsEvents"></div></section></div>
+          </section>
+
+          <section class="view" data-view="seo" aria-labelledby="seoTitle" hidden>
+            <div class="page-heading"><div><h1 id="seoTitle">SEO与GEO</h1><p>统一管理搜索引擎页面健康和生成式答案中的品牌事实。</p></div><div class="page-actions"><button class="button button--secondary" type="button" id="saveSeoButton">保存参数</button><button class="button" type="button" id="publishSeoButton">提交 Agent 审核</button></div></div>
+            <div class="metric-grid" id="seoMetrics"></div>
+            <div class="dashboard-grid dashboard-grid--equal"><section class="panel"><header class="panel-header"><div class="panel-title"><h2>品牌事实</h2><p>中英文事实合同</p></div></header><form class="panel-body" id="seoEntityForm"></form></section><section class="panel"><header class="panel-header"><div class="panel-title"><h2>连接器</h2><p>未接入的数据明确显示等待配置</p></div></header><div class="panel-body" id="seoConnectors"></div></section></div>
+            <section class="panel"><header class="panel-header"><div class="panel-title"><h2>目标问题</h2><p>为后续 GEO 研究保留可替换的问题清单</p></div></header><div class="panel-body"><textarea id="seoQuestions" rows="7" placeholder="每行一个客户可能向搜索引擎或 AI 提出的问题"></textarea></div></section>
+            <section class="panel"><header class="panel-header"><div class="panel-title"><h2>SEO/GEO Agent 审批</h2><p>结构化候选必须由管理员明确批准或驳回</p></div></header><div class="panel-body panel-body--flush" id="seoAgentChanges"></div></section>
+          </section>
+
+          <section class="view" data-view="schedule" aria-labelledby="scheduleTitle" hidden>
+            <div class="page-heading"><div><h1 id="scheduleTitle">排班与值班</h1><p>全站工作时间由开发者设置；管理员可查看并控制自己的额外值班。</p></div><div class="page-actions"><button class="button" type="button" id="extraDutyButton">启动额外值班</button></div></div>
+            <section class="panel"><header class="panel-header"><div class="panel-title"><h2>人工在线时间</h2><p id="scheduleTimezone">Asia/Shanghai</p></div></header><div class="panel-body" id="scheduleWindows"></div></section>
+          </section>
+
+          <section class="view" data-view="profile" aria-labelledby="profileTitle" hidden>
+            <div class="page-heading"><div><h1 id="profileTitle">我的账号</h1><p>管理员只能修改自己的名称；开发者名称固定。</p></div></div>
+            <div class="dashboard-grid dashboard-grid--equal"><section class="panel"><header class="panel-header"><div class="panel-title"><h2>个人资料</h2><p>修改后会同步到会话与审计记录</p></div></header><form class="panel-body" id="profileForm"><div class="field"><label for="profileUsername">账号</label><input id="profileUsername" readonly /></div><div class="field"><label for="profileDisplayName">显示名称</label><input id="profileDisplayName" maxlength="40" required /></div><div class="form-actions"><button class="button" type="submit">保存名称</button></div></form></section><section class="panel"><header class="panel-header"><div class="panel-title"><h2>账号安全</h2><p>登录与恢复状态</p></div></header><div class="panel-body" id="profileSecurity"></div></section></div>
           </section>
 
           <section class="view" data-view="notifications" aria-labelledby="notificationsTitle" hidden>
@@ -102,8 +153,9 @@
           </section>
 
           <section class="view" data-view="rules" aria-labelledby="rulesTitle" hidden>
-            <div class="page-heading"><div><h1 id="rulesTitle">客服规则</h1><p>管理人工优先、敏感事项和自动回复边界，降低错误承诺风险。</p></div><div class="page-actions"><button class="button button--secondary" type="button" id="rulesTestButton">测试规则</button><button class="button" type="submit" form="rulesForm">保存草稿</button></div></div>
+            <div class="page-heading"><div><h1 id="rulesTitle">客服规则</h1><p>管理人工优先、敏感事项和自动回复边界；保存后立即应用并进入审计记录。</p></div><div class="page-actions"><button class="button button--secondary" type="button" id="rulesTestButton">测试规则</button><button class="button" type="submit" form="rulesForm">保存并应用</button></div></div>
             <form id="rulesForm"><div class="dashboard-grid dashboard-grid--equal"><section class="panel"><header class="panel-header"><div class="panel-title"><h2>服务模式</h2><p>控制 AI 与人工的协作方式</p></div></header><div class="panel-body" id="serviceModeRules"></div></section><section class="panel"><header class="panel-header"><div class="panel-title"><h2>必须转人工</h2><p>命中后停止自动承诺</p></div></header><div class="panel-body" id="handoffRules"></div></section></div><section class="panel"><header class="panel-header"><div class="panel-title"><h2>自定义说明</h2><p>补充当期业务政策和应答口径</p></div></header><div class="panel-body"><div class="field"><label for="rulesNote">运营说明</label><textarea id="rulesNote" name="note" maxlength="4000" placeholder="例如：国庆假期期间不承诺具体出货日期。"></textarea></div></div></section></form>
+            <section class="panel"><header class="panel-header"><div class="panel-title"><h2>规则版本历史</h2><p>所有修改都会保留；恢复旧版时会创建新的可审计版本</p></div></header><div class="panel-body panel-body--flush" id="rulesHistory"></div></section>
           </section>
 
           <section class="view" data-view="audit" aria-labelledby="auditTitle" hidden>
@@ -115,12 +167,14 @@
       </div>
     </div>
 
-    <nav class="mobile-bottom-nav mobile-bottom-nav--admin" aria-label="移动端主要导航">
+    <nav class="mobile-bottom-nav mobile-bottom-nav--admin" style="--mobile-nav-count:7" aria-label="移动端主要导航">
       <button type="button" data-nav="dashboard" data-title="工作台"><span class="nav-icon">首</span><span>工作台</span></button>
       <button type="button" data-nav="sessions" data-title="实时会话"><span class="nav-icon">聊</span><span>会话</span></button>
       <button type="button" data-nav="content" data-title="网站内容"><span class="nav-icon">文</span><span>内容</span></button>
+      <button type="button" data-nav="analytics" data-title="访问与转化"><span class="nav-icon">数</span><span>数据</span></button>
+      <button type="button" data-nav="seo" data-title="SEO与GEO"><span class="nav-icon">搜</span><span>SEO</span></button>
+      <button type="button" data-nav="schedule" data-title="排班与值班"><span class="nav-icon">班</span><span>值班</span></button>
       <button type="button" data-nav="rules" data-title="客服规则"><span class="nav-icon">规</span><span>规则</span></button>
-      <button type="button" data-nav="audit" data-title="操作记录"><span class="nav-icon">录</span><span>记录</span></button>
     </nav>
     <div class="ops-toast" id="opsToast" role="status" aria-live="polite" hidden></div>
     <script src="./operations-common.js"></script>

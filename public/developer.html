@@ -22,15 +22,19 @@
             <p class="ops-nav-label">运行状态</p>
             <button type="button" data-nav="systems" data-title="系统状态"><span class="nav-icon">态</span>系统状态</button>
             <button type="button" data-nav="traces" data-title="Agent 追踪"><span class="nav-icon">链</span>Agent 追踪</button>
+            <button type="button" data-nav="analytics" data-title="访问指标"><span class="nav-icon">数</span>访问指标</button>
+            <button type="button" data-nav="orders" data-title="订单系统"><span class="nav-icon">单</span>订单系统</button>
           </div>
           <div class="ops-nav-group">
             <p class="ops-nav-label">变更管理</p>
             <button type="button" data-nav="releases" data-title="发布审批"><span class="nav-icon">发</span>发布审批</button>
             <button type="button" data-nav="environment" data-title="环境与集成"><span class="nav-icon">接</span>环境与集成</button>
+            <button type="button" data-nav="seo" data-title="SEO与GEO"><span class="nav-icon">搜</span>SEO与GEO</button>
           </div>
           <div class="ops-nav-group">
             <p class="ops-nav-label">值班</p>
             <button type="button" data-nav="emergency" data-title="移动应急"><span class="nav-icon">急</span>移动应急</button>
+            <button type="button" data-nav="schedule" data-title="工作时间"><span class="nav-icon">班</span>工作时间</button>
           </div>
         </nav>
         <div class="sidebar-foot"><div class="identity"><span class="identity-avatar">开</span><span><strong id="developerName">值班开发者</strong><small id="developerRole">权限确认中</small></span></div></div>
@@ -54,6 +58,30 @@
             <section class="panel"><header class="panel-header"><div class="panel-title"><h2>近期变化</h2><p>部署、配置和依赖状态</p></div></header><div class="panel-body panel-body--flush" id="changesTable"></div></section>
           </section>
 
+          <section class="view" data-view="analytics" aria-labelledby="developerAnalyticsTitle" hidden>
+            <div class="page-heading"><div><h1 id="developerAnalyticsTitle">访问指标</h1><p>技术视角查看匿名事件采集健康，不展示客户正文。</p></div></div>
+            <div class="metric-grid" id="developerAnalyticsMetrics"></div>
+            <section class="panel"><header class="panel-header"><div class="panel-title"><h2>采集策略</h2><p>保留期限和事件白名单</p></div></header><div class="panel-body" id="developerAnalyticsPolicy"></div></section>
+          </section>
+
+          <section class="view" data-view="orders" aria-labelledby="developerOrdersTitle" hidden>
+            <div class="page-heading"><div><h1 id="developerOrdersTitle">订单系统</h1><p>检测客户流程、工厂生产流程、短信入口与订单运行状态。</p></div><div class="page-actions"><button class="button" type="button" id="saveOrderSettings">保存参数</button></div></div>
+            <div class="metric-grid" id="developerOrderMetrics"></div>
+            <div class="dashboard-grid dashboard-grid--equal"><section class="panel"><header class="panel-header"><div class="panel-title"><h2>客户订单流程</h2><p>固定骨架，不允许跳步</p></div></header><div class="panel-body" id="developerCustomerStages"></div></section><section class="panel"><header class="panel-header"><div class="panel-title"><h2>工厂生产流程</h2><p>进入大货生产后启用</p></div></header><div class="panel-body" id="developerProductionStages"></div></section></div>
+            <section class="panel"><header class="panel-header"><div class="panel-title"><h2>运行参数</h2><p>可调整可见性与 SLA，不改变固定流程顺序</p></div></header><div class="panel-body"><textarea id="developerOrderSettingsJson" rows="12" style="width:100%;min-height:220px;padding:10px;border:1px solid var(--line-strong);border-radius:4px"></textarea></div></section>
+          </section>
+
+          <section class="view" data-view="seo" aria-labelledby="developerSeoTitle" hidden>
+            <div class="page-heading"><div><h1 id="developerSeoTitle">SEO与GEO</h1><p>查看事实合同、连接器状态和发布版本；参数由管理员维护。</p></div></div>
+            <div class="metric-grid" id="developerSeoMetrics"></div>
+            <section class="panel"><header class="panel-header"><div class="panel-title"><h2>连接器与技术输出</h2><p>sitemap、robots、canonical、JSON-LD 和 llms.txt</p></div></header><div class="panel-body" id="developerSeoDetail"></div></section>
+          </section>
+
+          <section class="view" data-view="schedule" aria-labelledby="developerScheduleTitle" hidden>
+            <div class="page-heading"><div><h1 id="developerScheduleTitle">工作时间</h1><p>开发者可修改全站人工排班；修改后管理员端和访客端即时同步。</p></div><div class="page-actions"><button class="button" type="button" id="saveDeveloperSchedule">保存排班</button></div></div>
+            <section class="panel"><header class="panel-header"><div class="panel-title"><h2>排班 JSON</h2><p>可先使用默认值，再按星期调整</p></div></header><div class="panel-body"><textarea id="developerScheduleJson" rows="14" style="width:100%;min-height:250px;padding:10px;border:1px solid var(--line-strong);border-radius:4px"></textarea></div></section>
+          </section>
+
           <section class="view" data-view="traces" aria-labelledby="tracesTitle" hidden>
             <div class="page-heading"><div><h1 id="tracesTitle">Agent 追踪</h1><p>按请求查看分工、证据、审核和最终输出，敏感正文默认脱敏。</p></div><div class="page-actions"><button class="button button--secondary" type="button" id="liveTraceToggle" aria-pressed="true">实时刷新：开</button></div></div>
             <div class="filterbar"><input class="search-input" id="traceSearch" type="search" placeholder="请求编号或会话编号" aria-label="搜索追踪" /><select id="traceStatusFilter" aria-label="筛选追踪状态"><option value="">全部结果</option><option value="complete">成功</option><option value="warning">需关注</option><option value="failed">失败</option></select><select id="traceAgentFilter" aria-label="筛选 Agent"><option value="">全部 Agent</option></select></div>
@@ -67,6 +95,7 @@
             <div class="page-heading"><div><h1 id="releasesTitle">发布审批</h1><p>核对变更、检查结果和回滚点后，再批准进入下一环境。</p></div><div class="page-actions"><span id="releaseQueueStatus"></span></div></div>
             <section class="panel"><div class="panel-body panel-body--flush" id="releaseTable"></div></section>
             <section class="panel" id="releaseDetailPanel"><header class="panel-header" id="releaseDetailHeader"><div class="panel-title"><h2>发布详情</h2><p>从列表选择待审批发布</p></div></header><div class="panel-body" id="releaseDetail"></div></section>
+            <section class="panel"><header class="panel-header"><div class="panel-title"><h2>CMS 与 SEO/GEO 版本</h2><p>查看真实发布快照；回滚会产生新的审计版本</p></div></header><div class="panel-body panel-body--flush" id="managedVersionTable"></div></section>
           </section>
 
           <section class="view" data-view="environment" aria-labelledby="environmentTitle" hidden>
@@ -91,11 +120,13 @@
       </div>
     </div>
 
-    <nav class="mobile-bottom-nav" aria-label="移动端导航">
+    <nav class="mobile-bottom-nav" style="--mobile-nav-count:7" aria-label="移动端导航">
       <button type="button" data-nav="systems" data-title="系统状态"><span class="nav-icon">态</span><span>状态</span></button>
       <button type="button" data-nav="traces" data-title="Agent 追踪"><span class="nav-icon">链</span><span>追踪</span></button>
+      <button type="button" data-nav="analytics" data-title="访问指标"><span class="nav-icon">数</span><span>数据</span></button>
       <button type="button" data-nav="releases" data-title="发布审批"><span class="nav-icon">发</span><span>发布</span></button>
       <button type="button" data-nav="environment" data-title="环境与集成"><span class="nav-icon">接</span><span>集成</span></button>
+      <button type="button" data-nav="seo" data-title="SEO与GEO"><span class="nav-icon">搜</span><span>SEO</span></button>
       <button type="button" data-nav="emergency" data-title="移动应急"><span class="nav-icon">急</span><span>应急</span></button>
     </nav>
     <div class="ops-toast" id="opsToast" role="status" aria-live="polite" hidden></div>

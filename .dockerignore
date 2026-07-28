@@ -1,0 +1,16 @@
+.git
+.github
+.env
+.env.*
+!.env.example
+backups
+coverage
+data/runtime
+docs
+knowledge/prepared
+node_modules
+outputs
+test
+work
+*.enc
+*.log

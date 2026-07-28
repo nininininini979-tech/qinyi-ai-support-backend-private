@@ -5,17 +5,14 @@ import os from "node:os";
 import path from "node:path";
 import { buildApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
-import { totpCode } from "../src/operations/auth.js";
-
-const TOTP_SECRET = "JBSWY3DPEHPK3PXP";
 const SESSION_SECRET = "0123456789abcdef0123456789abcdef";
 const DEVELOPER_TOKEN = "developer-token-0123456789abcdef";
 const CLIENT_HEADERS = { "x-client-id": "4bb89af4-8f24-4ef5-a31c-8d2be4a81a16" };
 const ACCOUNTS = [
-  { username: "support", displayName: "客服一", role: "support", password: "support-password-123", totpSecret: TOTP_SECRET },
-  { username: "administrator", displayName: "运营一", role: "administrator", password: "administrator-password-123", totpSecret: TOTP_SECRET },
-  { username: "developer", displayName: "开发一", role: "developer", password: "developer-password-123", totpSecret: TOTP_SECRET },
-  { username: "owner", displayName: "负责人", role: "system_owner", password: "owner-password-123", totpSecret: TOTP_SECRET }
+  { username: "support", displayName: "客服一", role: "support", password: "support-password-123" },
+  { username: "administrator", displayName: "运营一", role: "administrator", password: "administrator-password-123" },
+  { username: "developer", displayName: "开发一", role: "developer", password: "developer-password-123" },
+  { username: "owner", displayName: "负责人", role: "system_owner", password: "owner-password-123" }
 ];
 
 async function createTestApp(t) {
@@ -46,7 +43,7 @@ async function login(app, account) {
   const response = await app.inject({
     method: "POST",
     url: "/api/admin/auth/login",
-    payload: { username: account.username, password: account.password, totp: totpCode(account.totpSecret) }
+    payload: { username: account.username, password: account.password }
   });
   assert.equal(response.statusCode, 200, `login failed for ${account.role}`);
   return { authorization: `Bearer ${response.json().token}` };

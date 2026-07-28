@@ -24,6 +24,8 @@ const schema = z.object({
   DEMO_USER_ID: z.string().default("demo-user-1"),
   DEMO_TENANT_ID: z.string().default("demo-tenant"),
   PUBLIC_TENANT_ID: z.string().default("public-web"),
+  PUBLIC_SITE_URL: z.string().url().default("https://nininininini979-tech.github.io/qinyi-printing-website"),
+  PUBLIC_API_URL: z.string().url().optional(),
   USER_HASH_SECRET: z.string().default("development-only-secret-change-me"),
   TRUST_PROXY: bool,
   ALLOWED_ORIGINS: z.string().default("http://127.0.0.1:3000,http://localhost:3000"),
@@ -40,13 +42,33 @@ const schema = z.object({
   THOUGHT_NORMAL_DEADLINE_MS: z.coerce.number().int().min(30000).max(44000).default(40000),
   THOUGHT_PROFESSIONAL_DEADLINE_MS: z.coerce.number().int().min(45000).max(55000).default(55000),
   OPERATIONS_ENABLED: bool,
+  OPERATIONS_STORE: z.enum(["file", "postgres"]).default("file"),
   OPERATIONS_DATA_DIR: z.string().default("data/runtime/operations"),
+  DATABASE_URL: z.string().optional(),
+  DATABASE_SSL_MODE: z.enum(["disable", "require", "verify-full"]).default("require"),
+  UPLOAD_STORE: z.enum(["file", "s3"]).default("file"),
+  UPLOAD_DATA_DIR: z.string().optional(),
+  S3_REGION: z.string().default("auto"),
+  S3_ENDPOINT: z.string().url().optional(),
+  S3_BUCKET: z.string().optional(),
+  S3_KEY_PREFIX: z.string().default("qinyi"),
+  S3_ACCESS_KEY_ID: z.string().optional(),
+  S3_SECRET_ACCESS_KEY: z.string().optional(),
+  S3_FORCE_PATH_STYLE: bool,
+  S3_SERVER_SIDE_ENCRYPTION: z.enum(["none", "AES256", "aws:kms"]).default("AES256"),
+  S3_KMS_KEY_ID: z.string().optional(),
   OPERATIONS_ADMIN_PASSWORD: z.string().optional(),
-  OPERATIONS_ADMIN_TOTP_SECRET: z.string().optional(),
   OPERATIONS_USERS_JSON: z.string().optional(),
+  OPERATIONS_ACCOUNTS_PROVISIONED: bool,
   OPERATIONS_SESSION_SECRET: z.string().optional(),
   OPERATIONS_SESSION_TTL_SECONDS: z.coerce.number().int().min(300).max(86400).default(28800),
   OPERATIONS_DEVELOPER_TOKEN: z.string().optional(),
+  ORDER_SMS_PROVIDER: z.enum(["disabled", "mock", "http"]).default("disabled"),
+  ORDER_SMS_HTTP_URL: z.string().url().optional(),
+  ORDER_SMS_HTTP_TOKEN: z.string().optional(),
+  ORDER_SMS_TEMPLATE_ID: z.string().max(160).default(""),
+  ORDER_SMS_SIGN_NAME: z.string().max(80).default("勤益"),
+  ORDER_SMS_TIMEOUT_MS: z.coerce.number().int().min(1000).max(15000).default(5000),
   OPERATOR_MODE: z.enum(["observe", "draft", "auto", "paused"]).default("auto"),
   AGENT_A_PROVIDER: z.enum(["mock", "openai-compatible"]).default("mock"),
   AGENT_A_API_KEY: z.string().optional(),
@@ -73,6 +95,10 @@ const schema = z.object({
 export function loadConfig(env = process.env) {
   const config = schema.parse(env);
   config.allowedOrigins = config.ALLOWED_ORIGINS.split(",").map((value) => value.trim()).filter(Boolean);
+  config.UPLOAD_DATA_DIR ||= `${config.OPERATIONS_DATA_DIR}/uploads`;
+  config.PUBLIC_API_URL ||= config.NODE_ENV === "production"
+    ? "https://qinyi-ai-support-private-api.vercel.app"
+    : `http://${config.HOST === "0.0.0.0" ? "127.0.0.1" : config.HOST}:${config.PORT}`;
 
   if (config.SUPPORT_PROVIDER === "openai" && (!config.OPENAI_API_KEY || !config.OPENAI_VECTOR_STORE_ID)) {
     throw new Error("SUPPORT_PROVIDER=openai requires OPENAI_API_KEY and OPENAI_VECTOR_STORE_ID");
@@ -93,26 +119,45 @@ export function loadConfig(env = process.env) {
     if (config.OPERATIONS_USERS_JSON) {
       try { users = JSON.parse(config.OPERATIONS_USERS_JSON); }
       catch (_error) { throw new Error("OPERATIONS_USERS_JSON must be valid JSON"); }
-      if (!Array.isArray(users) || users.length < 1 || users.length > 12) throw new Error("OPERATIONS_USERS_JSON must contain 1 to 12 users");
+      if (!Array.isArray(users) || users.length < 1 || users.length > 24) throw new Error("OPERATIONS_USERS_JSON must contain 1 to 24 users");
       for (const user of users) {
         if (!/^[A-Za-z0-9_.-]{2,40}$/.test(String(user.username || ""))) throw new Error("Each operations user requires a valid username");
         if (String(user.password || "").length < 12) throw new Error("Each operations user password must contain at least 12 characters");
-        if (!/^[A-Z2-7\s-]{16,}$/i.test(String(user.totpSecret || ""))) throw new Error("Each operations user requires a base32 TOTP secret");
         if (!["support", "administrator", "developer", "system_owner"].includes(user.role)) throw new Error("Unsupported operations user role");
       }
-    } else {
+    } else if (config.OPERATIONS_ADMIN_PASSWORD) {
       if (!config.OPERATIONS_ADMIN_PASSWORD || config.OPERATIONS_ADMIN_PASSWORD.length < 12) throw new Error("OPERATIONS_ENABLED=true requires OPERATIONS_ADMIN_PASSWORD with at least 12 characters");
-      if (!config.OPERATIONS_ADMIN_TOTP_SECRET || !/^[A-Z2-7\s-]{16,}$/i.test(config.OPERATIONS_ADMIN_TOTP_SECRET)) throw new Error("OPERATIONS_ENABLED=true requires a base32 OPERATIONS_ADMIN_TOTP_SECRET");
-      users = [{ username: "admin", displayName: "勤益系统负责人", role: "system_owner", password: config.OPERATIONS_ADMIN_PASSWORD, totpSecret: config.OPERATIONS_ADMIN_TOTP_SECRET }];
+      users = [{ username: "admin", displayName: "勤益系统负责人", role: "system_owner", password: config.OPERATIONS_ADMIN_PASSWORD }];
+    } else if (!config.OPERATIONS_ACCOUNTS_PROVISIONED) {
+      throw new Error("OPERATIONS_ENABLED=true requires provisioned accounts or an explicit bootstrap credential");
     }
     config.operationsUsers = users;
     if (!config.OPERATIONS_SESSION_SECRET || config.OPERATIONS_SESSION_SECRET.length < 32) throw new Error("OPERATIONS_ENABLED=true requires OPERATIONS_SESSION_SECRET with at least 32 characters");
     if (!config.OPERATIONS_DEVELOPER_TOKEN || config.OPERATIONS_DEVELOPER_TOKEN.length < 24) throw new Error("OPERATIONS_ENABLED=true requires OPERATIONS_DEVELOPER_TOKEN with at least 24 characters");
+    if (config.OPERATIONS_STORE === "postgres" && !config.DATABASE_URL) {
+      throw new Error("OPERATIONS_STORE=postgres requires DATABASE_URL");
+    }
+    if (config.UPLOAD_STORE === "s3") {
+      if (!config.S3_BUCKET) throw new Error("UPLOAD_STORE=s3 requires S3_BUCKET");
+      if (Boolean(config.S3_ACCESS_KEY_ID) !== Boolean(config.S3_SECRET_ACCESS_KEY)) {
+        throw new Error("S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be set together");
+      }
+      if (config.S3_SERVER_SIDE_ENCRYPTION === "aws:kms" && !config.S3_KMS_KEY_ID) {
+        throw new Error("S3_SERVER_SIDE_ENCRYPTION=aws:kms requires S3_KMS_KEY_ID");
+      }
+    }
+  }
+  if (config.ORDER_SMS_PROVIDER === "http") {
+    if (!config.ORDER_SMS_HTTP_URL) throw new Error("ORDER_SMS_PROVIDER=http requires ORDER_SMS_HTTP_URL");
+    if (!config.ORDER_SMS_HTTP_TOKEN || config.ORDER_SMS_HTTP_TOKEN.length < 16) {
+      throw new Error("ORDER_SMS_PROVIDER=http requires ORDER_SMS_HTTP_TOKEN with at least 16 characters");
+    }
   }
   if (config.NODE_ENV === "production") {
     if (config.AUTH_MODE === "demo") throw new Error("AUTH_MODE=demo is forbidden in production");
     if (config.SESSION_BACKEND === "memory") throw new Error("SESSION_BACKEND=memory is forbidden in production");
     if (config.USER_HASH_SECRET.length < 32) throw new Error("USER_HASH_SECRET must be at least 32 characters in production");
+    if (config.ORDER_SMS_PROVIDER === "mock") throw new Error("ORDER_SMS_PROVIDER=mock is forbidden in production");
   }
   return config;
 }

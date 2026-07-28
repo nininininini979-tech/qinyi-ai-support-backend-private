@@ -12,6 +12,13 @@ test("mock provider retrieves curated product information with a citation", asyn
   assert.match(result.answer, /拼图|片/);
 });
 
+test("mock provider routes a common product discovery question to the approved catalog", async () => {
+  const result = await provider.answer({ message: "你们有哪些产品？", identity: { tenantId: "demo-tenant", userId: "demo-user-1" } });
+  assert.equal(result.grounded, true);
+  assert.equal(result.citations[0]?.filename, "02-product-catalog-and-use-cases.md");
+  assert.match(result.answer, /常规平面拼图|桌游与棋盘游戏/);
+});
+
 test("mock provider does not invent an unsupported fact", async () => {
   const result = await provider.answer({ message: "你们董事长的生日是哪天？", identity: { tenantId: "demo-tenant", userId: "demo-user-1" } });
   assert.equal(result.grounded, false);

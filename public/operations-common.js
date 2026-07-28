@@ -52,37 +52,75 @@
     const overlay = document.createElement("div");
     overlay.id = "opsLoginOverlay";
     overlay.className = "login-overlay";
+    const surface = document.body.dataset.surface === "developer" ? "developer" : "admin";
+    const portal = surface === "developer" ? { title: "勤益开发者登录", subtitle: "系统、Agent 与发布治理", accounts: "developer01–developer04", switchHref: "/admin", switchLabel: "切换至管理员界面" } : { title: "勤益管理员登录", subtitle: "客服、内容与经营管理", accounts: "admin01–admin20", switchHref: "/developer", switchLabel: "切换至开发者界面" };
     overlay.innerHTML = `<form class="login-dialog" id="opsLoginForm">
-      <div class="login-brand"><span class="brand-mark" aria-hidden="true">勤</span><div><strong>勤益安全登录</strong><span>运营与开发控制台</span></div></div>
-      <p>请输入后台账号、密码和身份验证器中的 6 位动态验证码。</p>
-      <label>后台账号<input name="username" type="text" value="admin" autocomplete="username" minlength="2" maxlength="40" required></label>
-      <label>后台密码<input name="password" type="password" autocomplete="current-password" minlength="12" required></label>
-      <label>动态验证码<input name="totp" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required></label>
+      <div class="login-brand"><span class="brand-mark" aria-hidden="true">勤</span><div><strong>${portal.title}</strong><span>${portal.subtitle}</span></div><span class="login-portal-tag">${surface === "developer" ? "开发者" : "管理员"}</span></div>
+      <div class="login-progress" id="opsLoginProgress"><span class="is-active">账号密码登录</span></div>
+      <div class="login-account-range"><strong>个人账号</strong><span>${portal.accounts}</span><small>${surface === "developer" ? "名称固定；拥有更深层系统权限" : "20名管理员平级；登录后只能修改自己的名称"}</small></div>
+      <div id="opsLoginStep"></div>
       <div class="login-error" id="opsLoginError" role="alert" hidden></div>
-      <button class="button" type="submit">安全登录</button>
+      <button class="button" id="opsLoginSubmit" type="submit">继续</button>
+      <a class="login-switch" href="${portal.switchHref}">${portal.switchLabel}</a>
     </form>`;
     document.body.appendChild(overlay);
-    overlay.querySelector("input").focus();
-    overlay.querySelector("form").addEventListener("submit", async (event) => {
+    const form = overlay.querySelector("form");
+    const stepBox = document.getElementById("opsLoginStep");
+    const errorBox = document.getElementById("opsLoginError");
+    const button = document.getElementById("opsLoginSubmit");
+
+    function enforcePortal(payload) {
+      const role = payload?.user?.role;
+      if (!role) return;
+      if (surface === "developer" && !["developer", "system_owner"].includes(role)) throw new Error("此入口仅供开发者账号使用，请切换至管理员界面。");
+      if (surface === "admin" && role === "developer") throw new Error("此账号属于开发者，请切换至开发者界面。");
+    }
+
+    function loginFields() {
+      stepBox.innerHTML = `<p>使用分配给您的个人账号和密码直接登录。</p>
+        <label>后台账号<input name="username" type="text" autocomplete="username" minlength="2" maxlength="40" required></label>
+        <label>后台密码<input name="password" type="password" autocomplete="current-password" minlength="12" required></label>`;
+      button.textContent = "登录";
+      stepBox.querySelector("input").focus();
+    }
+
+    function showError(message) {
+      errorBox.textContent = message || "操作失败，请重试。";
+      errorBox.hidden = false;
+    }
+
+    async function authRequest(path, body) {
+      const response = await fetch(path, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(body),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const error = new Error(payload.error || "操作失败，请检查填写内容。");
+        error.payload = payload;
+        throw error;
+      }
+      return payload;
+    }
+
+    loginFields();
+    form.addEventListener("submit", async (event) => {
       event.preventDefault();
-      const form = event.currentTarget;
-      const button = form.querySelector("button");
-      const errorBox = document.getElementById("opsLoginError");
       button.disabled = true;
       errorBox.hidden = true;
       try {
-        const response = await fetch("/api/admin/auth/login", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify({ username: form.username.value.trim(), password: form.password.value, totp: form.totp.value }),
+        const payload = await authRequest("/api/admin/auth/login", {
+          username: form.username.value.trim(),
+          password: form.password.value
         });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok || !payload.token) throw new Error(payload.error || "登录失败，请检查凭据。");
+        enforcePortal(payload);
+        if (!payload.token) throw new Error("认证服务未返回登录会话。");
         storeSessionToken(payload.token);
         window.location.reload();
       } catch (error) {
-        errorBox.textContent = error.message || "登录失败。";
-        errorBox.hidden = false;
+        showError(error.message || "登录失败。");
       } finally {
         button.disabled = false;
       }
@@ -130,6 +168,95 @@
     }
   }
 
+  async function upload(path, formData, options) {
+    const settings = options || {};
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), settings.timeout || 120_000);
+    try {
+      const response = await fetch(apiUrl(path), {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          Accept: "application/json",
+          ...(sessionToken() ? { Authorization: `Bearer ${sessionToken()}` } : {})
+        },
+        body: formData,
+        signal: controller.signal
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (response.status === 401) showLogin();
+        throw new OpsApiError(payload.error || `上传失败（${response.status}）`, {
+          status: response.status,
+          requestId: payload.requestId,
+          payload
+        });
+      }
+      return payload;
+    } catch (error) {
+      if (error.name === "AbortError") throw new OpsApiError("上传超时，请检查文件大小后重试。", { status: 0 });
+      if (error instanceof OpsApiError) throw error;
+      throw new OpsApiError("无法连接上传服务。", { status: 0 });
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+
+  async function download(path, filename) {
+    const response = await fetch(apiUrl(path), {
+      credentials: "same-origin",
+      headers: sessionToken() ? { Authorization: `Bearer ${sessionToken()}` } : {}
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      if (response.status === 401) showLogin();
+      throw new OpsApiError(payload.error || `下载失败（${response.status}）`, {
+        status: response.status,
+        requestId: payload.requestId || response.headers.get("x-request-id"),
+        payload
+      });
+    }
+    const objectUrl = URL.createObjectURL(await response.blob());
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = String(filename || "attachment");
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  }
+
+  async function openHtml(path) {
+    const preview = window.open("about:blank", "_blank");
+    if (preview) preview.opener = null;
+    try {
+      const response = await fetch(apiUrl(path), {
+        credentials: "same-origin",
+        headers: {
+          Accept: "text/html",
+          ...(sessionToken() ? { Authorization: `Bearer ${sessionToken()}` } : {})
+        }
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        if (response.status === 401) showLogin();
+        throw new OpsApiError(payload.error || `预览失败（${response.status}）`, {
+          status: response.status,
+          requestId: payload.requestId,
+          payload
+        });
+      }
+      const objectUrl = URL.createObjectURL(new Blob([await response.text()], { type: "text/html" }));
+      if (preview) preview.location.replace(objectUrl);
+      else window.open(objectUrl, "_blank", "noopener");
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch (error) {
+      if (preview) preview.close();
+      if (error instanceof OpsApiError) throw error;
+      throw new OpsApiError("无法打开页面预览。", { status: 0 });
+    }
+  }
+
   function escapeHtml(value) {
     return String(value == null ? "" : value).replace(/[&<>'"]/g, (token) => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
@@ -138,7 +265,7 @@
 
   function formatNumber(value) {
     const numeric = Number(value);
-    return Number.isFinite(numeric) ? new Intl.NumberFormat("zh-CN").format(numeric) : "--";
+    return Number.isFinite(numeric) ? new Intl.NumberFormat("zh-CN").format(numeric) : "待补充";
   }
 
   function formatTime(value, includeDate) {
@@ -255,7 +382,7 @@
   }
 
   window.QinyiOps = {
-    OpsApiError, request, escapeHtml, formatNumber, formatTime, relativeTime, statusBadge,
+    OpsApiError, request, upload, download, openHtml, escapeHtml, formatNumber, formatTime, relativeTime, statusBadge,
     statusTone, loadingState, emptyState, errorState, setBusy, toast, setConnection,
     initShell, list, showLogin,
   };

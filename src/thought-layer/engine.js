@@ -200,7 +200,7 @@ export class ThoughtLayerEngine {
     } catch (error) {
       if (!isDeadlineError(error)) throw error;
       operation.cancelled = true;
-      const contract = this.agents.a.compileContract({ message: input.message, session: input.session || {}, options: input.options || {} });
+      const contract = this.agents.a.compileContract({ message: input.message, session: input.session || {}, options: input.options || {}, runtimePolicy: input.runtimePolicy });
       void this.memory.appendEvent({ sessionId: input.sessionId, type: "reply_timeout", agentId: AGENT_IDS.A, payload: { contractId: contract.id, professional, budgetMs } }).catch(() => {});
       return {
         action: "answer",
@@ -212,9 +212,9 @@ export class ThoughtLayerEngine {
     }
   }
 
-  async answerWithinDeadline({ message, identity, session = {}, sessionId, options = {}, deadlineAt, operation }) {
+  async answerWithinDeadline({ message, identity, session = {}, sessionId, options = {}, runtimePolicy, deadlineAt, operation }) {
     assertActive(operation);
-    const contract = this.agents.a.compileContract({ message, session, options });
+    const contract = this.agents.a.compileContract({ message, session, options, runtimePolicy });
     const playbookPrompt = await loadAutonomyPrompt(this.playbookDir, message);
     assertActive(operation);
     await this.memory.appendEvent({ sessionId, type: "customer_input", payload: { message, identity: { tenantId: identity.tenantId }, contract, options } });
